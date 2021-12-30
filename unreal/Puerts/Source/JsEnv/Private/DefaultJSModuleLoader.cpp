@@ -49,16 +49,7 @@ namespace puerts
 		if (PlatformFile.FileExists(*NormalizedPath))
 		{
             AbsolutePath = IFileManager::Get().ConvertToAbsolutePathForExternalAppForRead(*NormalizedPath);
-#if PLATFORM_WINDOWS
-			auto PathInWin = AbsolutePath.Replace(TEXT("/"), TEXT("\\"));
-			if (PathInWin.Len() && PathInWin[1] == ':')
-			{
-				PathInWin = PathInWin.Mid(0, 1).ToLower() + PathInWin.Mid(1);
-			}
-#endif
-            
             Path = NormalizedPath;
-            
             return true;
 		}
 
@@ -70,6 +61,7 @@ namespace puerts
         if (FPaths::GetExtension(RequiredModule) == TEXT(""))
         {
             return SearchModuleWithExtInDir(Dir, RequiredModule + ".js", Path, AbsolutePath)
+                || SearchModuleWithExtInDir(Dir, RequiredModule + ".mjs", Path, AbsolutePath)
                 || SearchModuleWithExtInDir(Dir, RequiredModule / "index.js", Path, AbsolutePath)
                 || SearchModuleWithExtInDir(Dir, RequiredModule / "package.json", Path, AbsolutePath);
         }
@@ -91,7 +83,7 @@ namespace puerts
         {
             return true;
         }
-        else if (RequiredDir != TEXT("") && !RequiredModule.GetCharArray().Contains('/') && !RequiredModule.EndsWith(TEXT(".js")))
+        if (RequiredDir != TEXT("") && !RequiredModule.GetCharArray().Contains('/') && !RequiredModule.EndsWith(TEXT(".js")) && !RequiredModule.EndsWith(TEXT(".mjs")))
         {
             // 调用require的文件所在的目录往上找
             TArray<FString> pathFrags;

@@ -29,6 +29,8 @@ var global = global || (function () { return this; }());
     }
     global.__tgjsLoadModule = undefined;
     
+    let org_require = global.require;
+    
     let findModule = global.__tgjsFindModule;
     global.__tgjsFindModule = undefined;
     
@@ -86,6 +88,11 @@ var global = global || (function () { return this; }());
                 buildinModule[moduleName] = nativeModule;
                 return nativeModule;
             }
+            if (org_require) {
+                try {
+                    return org_require(moduleName);
+                } catch (e) {}
+            }
             let moduleInfo = loadModule(moduleName, requiringDir);
             let split = moduleInfo.indexOf('\n');
             let split2 = moduleInfo.indexOf('\n', split + 1);
@@ -128,7 +135,7 @@ var global = global || (function () { return this; }());
         buildinModule[name] = module;
     }
     
-    function reload(reloadModuleKey) {
+    function forceReload(reloadModuleKey) {
         if (reloadModuleKey) {
             reloadModuleKey = normalize(reloadModuleKey);
         }
@@ -145,17 +152,26 @@ var global = global || (function () { return this; }());
         }
     }
     
+    function getModuleByUrl(url) {
+        if (url) {
+            url = normalize(url);
+            return moduleCache[url];
+        }
+    }
+    
     registerBuildinModule("puerts", puerts)
 
     puerts.genRequire = genRequire;
     
     puerts.__require = genRequire("");
     
-    puerts.__reload = reload;
-    
     puerts.getModuleBySID = getModuleBySID;
     
     puerts.registerBuildinModule = registerBuildinModule;
 
     puerts.loadModule = loadModule;
+    
+    puerts.forceReload = forceReload;
+    
+    puerts.getModuleByUrl = getModuleByUrl;
 }(global));

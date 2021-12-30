@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <vector>
+#include <map>
 
 #include "CoreMinimal.h"
 #include "CoreUObject.h"
@@ -26,14 +27,33 @@ namespace puerts
 class FStructWrapper
 {
 public:
-    explicit FStructWrapper(UStruct* InStruct): ExternalInitialize(nullptr), Struct(InStruct){}
+    explicit FStructWrapper(UStruct* InStruct): ExternalInitialize(nullptr), ExternalFinalize(nullptr), Struct(InStruct){}
+
+    FORCEINLINE void Init(UStruct* InStruct)
+    {
+        ExternalInitialize = nullptr;
+        ExternalFinalize = nullptr;
+        Struct = InStruct;
+        Properties.clear();
+        ExtensionMethods.clear();
+    }
 
     void AddExtensionMethods(std::vector<UFunction*> InExtensionMethods);
 
 protected:
-    std::vector<std::unique_ptr<FPropertyTranslator>> Properties;
+    std::vector<std::shared_ptr<FPropertyTranslator>> Properties;
 
-    std::vector<std::unique_ptr<FFunctionTranslator>> Functions;
+    std::map<FString, std::shared_ptr<FPropertyTranslator>> PropertiesMap;
+
+    std::shared_ptr<FPropertyTranslator> GetPropertyTranslator(PropertyMacro *InProperty);
+
+    std::map<FString, std::shared_ptr<FFunctionTranslator>> FunctionsMap;
+
+    std::map<FString, std::shared_ptr<FFunctionTranslator>> MethodsMap;
+
+    std::shared_ptr<FFunctionTranslator> GetFunctionTranslator(UFunction *InFunction);
+
+    std::shared_ptr<FFunctionTranslator> GetMethodTranslator(UFunction *InFunction, bool IsExtension);
 
     void InitTemplateProperties(v8::Isolate* Isolate, UStruct *InStruct, v8::Local<v8::FunctionTemplate> Template);
 
@@ -42,19 +62,18 @@ protected:
     std::vector<UFunction*> ExtensionMethods;
 
     InitializeFunc ExternalInitialize;
+    
+    FinalizeFunc ExternalFinalize;
              
-    union
-    {
-        UStruct *Struct;
-        UClass *Class;
-        UScriptStruct *ScriptStruct;
-    };
+    TWeakObjectPtr<UStruct> Struct;
 
     static void StaticClass(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
     static void Find(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
     static void Load(const v8::FunctionCallbackInfo<v8::Value>& Info);
+
+    friend class FJsEnvImpl;
 };
 
 class FScriptStructWrapper : public FStructWrapper
@@ -62,17 +81,14 @@ class FScriptStructWrapper : public FStructWrapper
 public:
     explicit FScriptStructWrapper(UScriptStruct *InScriptStruct) : FStructWrapper(InScriptStruct){}
 
-    v8::Local<v8::FunctionTemplate> ToFunctionTemplate(v8::Isolate* Isolate);
-
-    static void OnGarbageCollectedWithFree(const v8::WeakCallbackInfo<UScriptStruct>& Data);
+    static void OnGarbageCollectedWithFree(const v8::WeakCallbackInfo<FScriptStructWrapper>& Data);
 
     static void OnGarbageCollected(const v8::WeakCallbackInfo<UScriptStruct>& Data);
 
     static void *Alloc(UScriptStruct *InScriptStruct);
-private:
-        
 
-private:
+    static void Free(TWeakObjectPtr<UStruct> InStruct, FinalizeFunc InExternalFinalize, void* Ptr);
+
     static void New(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
     void New(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const v8::FunctionCallbackInfo<v8::Value>& Info);
@@ -83,11 +99,8 @@ class FClassWrapper : public FStructWrapper
 public:
     explicit FClassWrapper(UClass *InClass) : FStructWrapper(InClass) {}
 
-    v8::Local<v8::FunctionTemplate> ToFunctionTemplate(v8::Isolate* Isolate);
-
     static void OnGarbageCollected(const v8::WeakCallbackInfo<UClass>& Data);
 
-private:
     static void New(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
     void New(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const v8::FunctionCallbackInfo<v8::Value>& Info);

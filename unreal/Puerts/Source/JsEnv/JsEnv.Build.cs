@@ -6,19 +6,23 @@
 */
 
 using UnrealBuildTool;
-using System;
 using System.IO;
-using System.Collections.Generic;
+using System.Reflection;
 
 public class JsEnv : ModuleRules
 {
     private bool UseNewV8 = false;
 
+    private bool UseNodejs = false;
+
     private bool UseQuickjs = false;
+
+    private bool WithFFI = false;
 
     public JsEnv(ReadOnlyTargetRules Target) : base(Target)
     {
         //PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+        PublicDefinitions.Add("USING_IN_UNREAL_ENGINE");
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
@@ -27,8 +31,23 @@ public class JsEnv : ModuleRules
 
         bEnableExceptions = true;
         bEnableUndefinedIdentifierWarnings = false; // 避免在VS 2017编译时出现C4668错误
+        var ContextField = GetType().GetField("Context", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (ContextField != null)
+        {
+            var bCanHotReloadField = ContextField.FieldType.GetField("bCanHotReload", BindingFlags.Instance | BindingFlags.Public);
+            if (bCanHotReloadField != null)
+            {
+                bCanHotReloadField.SetValue(ContextField.GetValue(this), false);
+            }
+        }
 
-        if (UseNewV8)
+        if (UseNodejs && (Target.Platform == UnrealTargetPlatform.Win64 
+                          || Target.Platform == UnrealTargetPlatform.Mac 
+                          || Target.Platform == UnrealTargetPlatform.Linux))
+        {
+            ThirdPartyNodejs(Target);
+        }
+        else if (UseNewV8)
         {
             ThirdParty(Target);
         }
@@ -40,6 +59,8 @@ public class JsEnv : ModuleRules
         {
             OldThirdParty(Target);
         }
+        
+        if (WithFFI) AddFFI(Target);
 
         string coreJSPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "Content"));
         string destDirName = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", "..", "Content"));
@@ -51,30 +72,25 @@ public class JsEnv : ModuleRules
         string LibraryPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "Library"));
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            string V8LibraryPath = Path.Combine(LibraryPath, "V8", "Win64");
-
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "encoding.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "inspector.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "inspector_string_conversions.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_base_without_compiler_0.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_base_without_compiler_1.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_compiler.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_external_snapshot.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_libbase.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_libplatform.lib"));
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_libsampler.lib"));
-
-            /*
-            if (Target.bBuildEditor)
+            //if (Target.bBuildEditor)
+            //{
+            //    WinDll(Path.Combine(LibraryPath, "V8"));
+            //}
+            //else
             {
-                string WSLibraryPath = Path.Combine(LibraryPath, "Websockets", "Win64");
+                string V8LibraryPath = Path.Combine(LibraryPath, "V8", "Win64");
 
-                PublicAdditionalLibraries.Add(Path.Combine(WSLibraryPath, "websockets_static.lib"));
-                PublicAdditionalLibraries.Add(Path.Combine(WSLibraryPath, "libssl_static.lib"));
-                PublicAdditionalLibraries.Add(Path.Combine(WSLibraryPath, "libcrypto_static.lib"));
-                PublicAdditionalLibraries.Add(Path.Combine(WSLibraryPath, "zlib_internal.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "encoding.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "inspector.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "inspector_string_conversions.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_base_without_compiler_0.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_base_without_compiler_1.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_compiler.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_external_snapshot.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_libbase.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_libplatform.lib"));
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_libsampler.lib"));
             }
-            */
         }
         else if (Target.Platform == UnrealTargetPlatform.Android)
         {
@@ -141,8 +157,6 @@ public class JsEnv : ModuleRules
             PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libv8_libplatform.a"));
             PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libv8_libsampler.a"));
             PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libv8_nosnapshot.a"));
-
-            //PublicAdditionalLibraries.Add(Path.Combine(Path.Combine(LibraryPath, "ffi", "macOS"), "libffi.a"));
         }
         else if (Target.Platform == UnrealTargetPlatform.IOS)
         {
@@ -180,27 +194,98 @@ public class JsEnv : ModuleRules
             {
                 PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "v8", "7.4.288") });
             }
-            PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "websocketpp") });
-            PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "asio") });
         }
+        //else if (Target.bBuildEditor && Target.Platform == UnrealTargetPlatform.Win64)
+        //{
+        //    PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "v8", "8.4.371.19") });
+        //}
         else if (Target.Platform == UnrealTargetPlatform.Win64 ||
             Target.Platform == UnrealTargetPlatform.IOS ||
             Target.Platform == UnrealTargetPlatform.Mac ||
             Target.Platform == UnrealTargetPlatform.Linux)
         {
             PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "v8", "7.7.299") });
-            PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "websocketpp") });
-            PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "asio") });
+        }
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "websocketpp") });
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "asio") });
+    }
+
+    void AddFFI(ReadOnlyTargetRules Target)
+    {
+        string HeaderPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "Include"));
+        string LibraryPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "Library"));
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            PublicIncludePaths.AddRange(new string[] {Path.Combine(HeaderPath, "ffi", "Win64")});
+            PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "ffi", "Win64", "ffi.lib"));
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Mac)
+        {
+            PublicIncludePaths.AddRange(new string[] {Path.Combine(HeaderPath, "ffi", "macOS")});
+            PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "ffi", "macOS", "libffi.a"));
+        }
+        else if (Target.Platform == UnrealTargetPlatform.IOS)
+        {
+            PublicIncludePaths.AddRange(new string[] {Path.Combine(HeaderPath, "ffi", "iOS")});
+            PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "ffi", "iOS", "libffi.a"));
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Android)
+        {
+            PublicIncludePaths.AddRange(new string[] {Path.Combine(HeaderPath, "ffi", "Android")});
+            PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "ffi", "Android", "armeabi-v7a", "libffi.a"));
+            PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "ffi", "Android", "arm64-v8a", "libffi.a"));
         }
 
-        //if (Target.Platform == UnrealTargetPlatform.Mac)
-        //{
-        //    PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "ffi", "macOS") });
-        //}
-        //else if (Target.Platform == UnrealTargetPlatform.IOS)
-        //{
-        //    PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "ffi", "iOS") });
-        //}
+        PrivateDefinitions.Add("WITH_FFI");
+    }
+
+    void AddRuntimeDependencies(string[] DllNames, string LibraryPath, bool Delay)
+    {
+        string BinariesDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "Binaries", "Win64"));
+        foreach (var DllName in DllNames)
+        {
+            if(Delay) PublicDelayLoadDLLs.Add(DllName);
+            var DllPath = Path.Combine(LibraryPath, DllName);
+            var DestDllPath = Path.Combine(BinariesDir, DllName);
+            if (!Directory.Exists(BinariesDir))
+            {
+                Directory.CreateDirectory(BinariesDir);
+            }
+            try
+            {
+                System.IO.File.Delete(DestDllPath);
+            }
+            catch { }
+            if (!System.IO.File.Exists(DestDllPath) && System.IO.File.Exists(DllPath))
+            {
+                System.IO.File.Copy(DllPath, DestDllPath, false);
+            }
+            RuntimeDependencies.Add(DestDllPath);
+        }
+    }
+
+    void WinDll(string LibraryPath)
+    {
+        string V8LibraryPath = Path.Combine(LibraryPath, "Win64DLL");
+        PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8.dll.lib"));
+        PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_libplatform.dll.lib"));
+
+        AddRuntimeDependencies(new string[]
+        {
+            "v8.dll",
+            "v8_libplatform.dll",
+            "v8_libbase.dll",
+            "zlib.dll"
+        }, V8LibraryPath, false);
+    }
+    
+    void MacDylib(string LibraryPath)
+    {
+        string V8LibraryPath = Path.Combine(LibraryPath, "macOSdylib");
+        PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libv8.dylib"));
+        PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libv8_libplatform.dylib"));
+        PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libv8_libbase.dylib"));
+        PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libchrome_zlib.dylib"));
     }
 
     void ThirdParty(ReadOnlyTargetRules Target)
@@ -209,22 +294,20 @@ public class JsEnv : ModuleRules
         string HeaderPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "Include"));
         PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "websocketpp") });
         PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "asio") });
-        //if (Target.Platform == UnrealTargetPlatform.Mac)
-        //{
-        //    PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "ffi", "macOS") });
-        //}
-        //else if (Target.Platform == UnrealTargetPlatform.IOS)
-        //{
-        //    PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "ffi", "iOS") });
-        //}
         PublicIncludePaths.AddRange(new string[] { Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "v8", "Inc") });
 
         string LibraryPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "v8", "Lib"));
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
-            string V8LibraryPath = Path.Combine(LibraryPath, "Win64MD");
-
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "wee8.lib"));
+            if (!Target.bBuildEditor)
+            {
+                string V8LibraryPath = Path.Combine(LibraryPath, "Win64MD");
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "wee8.lib"));
+            }
+            else 
+            {
+                WinDll(LibraryPath);
+            }
         }
         else if (Target.Platform == UnrealTargetPlatform.Android)
         {
@@ -235,31 +318,67 @@ public class JsEnv : ModuleRules
         }
         else if (Target.Platform == UnrealTargetPlatform.Mac)
         {
-            // PublicFrameworks.AddRange(new string[] { "WebKit",  "JavaScriptCore" });
-            PublicFrameworks.AddRange(new string[] { "WebKit" });
-            string V8LibraryPath = Path.Combine(LibraryPath, "macOS");
-            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libwee8.a"));
-
-            //PublicAdditionalLibraries.Add(Path.Combine(Path.Combine(LibraryPath, "ffi", "macOS"), "libffi.a"));
+            //PublicFrameworks.AddRange(new string[] { "WebKit",  "JavaScriptCore" });
+            //PublicFrameworks.AddRange(new string[] { "WebKit" });
+            if (!Target.bBuildEditor)
+            {
+                string V8LibraryPath = Path.Combine(LibraryPath, "macOS");
+                PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libwee8.a"));
+            }
+            else
+            {
+                MacDylib(LibraryPath);
+            }
         }
         else if (Target.Platform == UnrealTargetPlatform.IOS)
         {
             PublicFrameworks.AddRange(new string[] { "WebKit" });
             string V8LibraryPath = Path.Combine(LibraryPath, "iOS", "arm64");
             PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libwee8.a"));
-
-            //PublicAdditionalLibraries.Add(Path.Combine(Path.Combine(LibraryPath, "ffi", "iOS"), "libffi.a"));
         } 
-        else if (Target.Platform == UnrealTargetPlatform.Linux) {
+        else if (Target.Platform == UnrealTargetPlatform.Linux) 
+        {
             string V8LibraryPath = Path.Combine(LibraryPath, "Linux");
             PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libwee8.a"));
+        }
+    }
+    
+    void ThirdPartyNodejs(ReadOnlyTargetRules Target)
+    {
+        PrivateDefinitions.Add("WITHOUT_INSPECTOR");//node already had one
+        PrivateDefinitions.Add("WITH_NODEJS");
+        string HeaderPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "nodejs"));
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "include") });
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "deps", "v8", "include") });
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "deps", "uv", "include") });
+
+        string LibraryPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "nodejs", "lib"));
+        if (Target.Platform == UnrealTargetPlatform.Win64)
+        {
+            string V8LibraryPath = Path.Combine(LibraryPath, "Win64");
+            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libnode.lib"));
+
+            AddRuntimeDependencies(new string[]
+            {
+                "libnode.dll",
+            }, V8LibraryPath, false);
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Mac)
+        {
+            string V8LibraryPath = Path.Combine(LibraryPath, "macOS");
+            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libnode.83.dylib"));
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Linux) 
+        {
+            string V8LibraryPath = Path.Combine(LibraryPath, "Linux");
+            PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libnode.so"));
         }
     }
 
     void ThirdPartyQJS(ReadOnlyTargetRules Target)
     {
-        Definitions.Add("WITHOUT_INSPECTOR");
-        Definitions.Add("WITH_QUICKJS");
+        PrivateDefinitions.Add("WITHOUT_INSPECTOR");
+        PrivateDefinitions.Add("WITH_QUICKJS");
         PublicIncludePaths.AddRange(new string[] { Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "quickjs", "Inc") });
 
         string LibraryPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "quickjs", "Lib"));
@@ -268,29 +387,12 @@ public class JsEnv : ModuleRules
             string V8LibraryPath = Path.Combine(LibraryPath, "Win64MD");
 
             PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "quickjs.dll.lib"));
-            var DllNames = new string[]
+            AddRuntimeDependencies(new string[]
             {
                 "libgcc_s_seh-1.dll",
                 "libwinpthread-1.dll",
                 "msys-quickjs.dll"
-            };
-            string BinariesDir = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "Binaries", "Win64"));
-            foreach (var DllName in DllNames)
-            {
-                PublicDelayLoadDLLs.Add(DllName);
-                var DllPath = Path.Combine(V8LibraryPath, DllName);
-                var DestDllPath = Path.Combine(BinariesDir, DllName);
-                try
-                {
-                    System.IO.File.Delete(DestDllPath);
-                }
-                catch { }
-                if (!System.IO.File.Exists(DestDllPath) && System.IO.File.Exists(DllPath))
-                {
-                    System.IO.File.Copy(DllPath, DestDllPath, false);
-                }
-                RuntimeDependencies.Add(DestDllPath);
-            }
+            }, V8LibraryPath, true);
         }
         else if (Target.Platform == UnrealTargetPlatform.Android)
         {
@@ -305,16 +407,12 @@ public class JsEnv : ModuleRules
             PublicFrameworks.AddRange(new string[] { "WebKit" });
             string V8LibraryPath = Path.Combine(LibraryPath, "macOS");
             PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libquickjs.a"));
-
-            //PublicAdditionalLibraries.Add(Path.Combine(Path.Combine(LibraryPath, "ffi", "macOS"), "libffi.a"));
         }
         else if (Target.Platform == UnrealTargetPlatform.IOS)
         {
             PublicFrameworks.AddRange(new string[] { "WebKit" });
             string V8LibraryPath = Path.Combine(LibraryPath, "iOS", "arm64");
             PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "libquickjs.a"));
-
-            //PublicAdditionalLibraries.Add(Path.Combine(Path.Combine(LibraryPath, "ffi", "iOS"), "libffi.a"));
         }
         else if (Target.Platform == UnrealTargetPlatform.Linux)
         {

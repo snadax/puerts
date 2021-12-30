@@ -53,6 +53,9 @@ void FTickerDelegateWrapper::Init(const v8::FunctionCallbackInfo<v8::Value> &Inf
 
 bool FTickerDelegateWrapper::CallFunction(float)
 {
+#ifdef SINGLE_THREAD_VERIFY
+    ensureMsgf(BoundThreadId == FPlatformTLS::GetCurrentThreadId(), TEXT("Access by illegal thread!"));
+#endif
     v8::Isolate::Scope Isolatescope(Isolate);
     v8::HandleScope HandleScope(GetIsolate());
     v8::Local<v8::Context> Context = v8::Local<v8::Context>::New(GetIsolate(), GetContext());
@@ -60,17 +63,20 @@ bool FTickerDelegateWrapper::CallFunction(float)
     v8::Local<v8::Function> Function = v8::Local<v8::Function>::New(GetIsolate(), GetFunction());
 
     v8::TryCatch TryCatch(GetIsolate());
+    IsCalling = true;
     v8::MaybeLocal<v8::Value> Result = Function->Call(Context, Context->Global(), 0, nullptr);
+    IsCalling = false;
     if (TryCatch.HasCaught())
     {
         ExceptionHandler(GetIsolate(), &TryCatch);
     }
 
-    if (!FunctionContinue)
+    const bool Continue = FunctionContinue;
+    if (!Continue)
     {
         DelegateHandleCleaner(DelegateHandle);
     }
-    return FunctionContinue;
+    return Continue;
 }
 
 void FTickerDelegateWrapper::SetDelegateHandle(FDelegateHandle* Handle)

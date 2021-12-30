@@ -16,20 +16,74 @@ namespace puerts
         ExtensionMethods.insert(ExtensionMethods.end(), InExtensionMethods.begin(), InExtensionMethods.end());
     }
 
+    std::shared_ptr<FPropertyTranslator> FStructWrapper::GetPropertyTranslator(PropertyMacro *InProperty)
+    {
+        auto Iter = PropertiesMap.find(InProperty->GetName());
+        if (Iter == PropertiesMap.end())
+        {
+            std::shared_ptr<FPropertyTranslator> PropertyTranslator = FPropertyTranslator::Create(InProperty);
+            if (PropertyTranslator)
+            {
+                PropertiesMap[InProperty->GetName()] = PropertyTranslator;
+                Properties.push_back(PropertyTranslator);
+            }
+            return PropertyTranslator;
+        }
+        FPropertyTranslator::CreateOn(InProperty, Iter->second.get());
+        return Iter->second;
+    }
+
+    std::shared_ptr<FFunctionTranslator>  FStructWrapper::GetMethodTranslator(UFunction *InFunction, bool IsExtension)
+    {
+        auto Iter = MethodsMap.find(InFunction->GetName());
+        if (Iter == MethodsMap.end())
+        {
+            std::shared_ptr<FFunctionTranslator> FunctionTranslator;
+            if (IsExtension)
+            {
+                FunctionTranslator = std::make_shared<FExtensionMethodTranslator>(InFunction);
+            }
+            else
+            {
+                FunctionTranslator = std::make_shared<FFunctionTranslator>(InFunction, false);
+            }
+            MethodsMap[InFunction->GetName()] = FunctionTranslator;
+            return FunctionTranslator;
+        }
+        Iter->second->Init(InFunction, false);
+        return Iter->second;
+    }
+
+    std::shared_ptr<FFunctionTranslator> FStructWrapper::GetFunctionTranslator(UFunction *InFunction)
+    {
+        auto Iter = FunctionsMap.find(InFunction->GetName());
+        if (Iter == FunctionsMap.end())
+        {
+            auto FunctionTranslator = std::make_shared<FFunctionTranslator>(InFunction, false);
+            FunctionsMap[InFunction->GetName()] = FunctionTranslator;
+            return FunctionTranslator;
+        }
+        Iter->second->Init(InFunction, false);
+        return Iter->second;
+    }
+
     void FStructWrapper::InitTemplateProperties(v8::Isolate* Isolate, UStruct *InStruct, v8::Local<v8::FunctionTemplate> Template)
     {
-        auto ClassDefinition = FindClassByType(Struct);
+        auto ClassDefinition = FindClassByType(Struct.Get());
         TSet<FString> AddedProperties;
         if (ClassDefinition)
         {
-            JSPropertyInfo* PropertyInfo = ClassDefinition->Propertys;
+            JSPropertyInfo* PropertyInfo = ClassDefinition->Properties;
             while (PropertyInfo && PropertyInfo->Name && PropertyInfo->Getter)
             {
                 AddedProperties.Add(UTF8_TO_TCHAR(PropertyInfo->Name));
                 v8::PropertyAttribute PropertyAttribute = v8::DontDelete;
                 if (!PropertyInfo->Setter) PropertyAttribute = (v8::PropertyAttribute)(PropertyAttribute | v8::ReadOnly);
-                Template->PrototypeTemplate()->SetAccessor(FV8Utils::InternalString(Isolate, PropertyInfo->Name), PropertyInfo->Getter, PropertyInfo->Setter,
-                    v8::Local<v8::Value>(), v8::DEFAULT, PropertyAttribute);
+                auto Data = PropertyInfo->Data ? static_cast<v8::Local<v8::Value>>(v8::External::New(Isolate, PropertyInfo->Data)): v8::Local<v8::Value>();
+                
+                Template->PrototypeTemplate()->SetAccessorProperty(FV8Utils::InternalString(Isolate, PropertyInfo->Name),
+                    v8::FunctionTemplate::New(Isolate, PropertyInfo->Getter, Data), v8::FunctionTemplate::New(Isolate, PropertyInfo->Setter, Data),
+                    PropertyAttribute);
                 ++PropertyInfo;
             }
         }
@@ -40,11 +94,10 @@ namespace puerts
             {
                 continue;
             }
-            auto PropertyTranslator = FPropertyTranslator::Create(Property);
+            auto PropertyTranslator = GetPropertyTranslator(Property);
             if (PropertyTranslator)
             {
                 PropertyTranslator->SetAccessor(Isolate, Template);
-                Properties.push_back(std::move(PropertyTranslator));
             }
             else
             {
@@ -56,7 +109,7 @@ namespace puerts
     v8::Local<v8::FunctionTemplate> FStructWrapper::ToFunctionTemplate(v8::Isolate* Isolate, v8::FunctionCallback Construtor)
     {
         v8::EscapableHandleScope HandleScope(Isolate);
-        auto ClassDefinition = FindClassByType(Struct);
+        auto ClassDefinition = FindClassByType(Struct.Get());
         auto Result = v8::FunctionTemplate::New(Isolate, Construtor, v8::External::New(Isolate, this)); //和class的区别就这里传的函数不一样，后续尽量重用
         Result->InstanceTemplate()->SetInternalFieldCount(4);
 
@@ -66,25 +119,28 @@ namespace puerts
         if (ClassDefinition)
         {
             ExternalInitialize = ClassDefinition->Initialize;
+            ExternalFinalize = ClassDefinition->Finalize;
             JSFunctionInfo* FunctionInfo = ClassDefinition->Methods;
             while (FunctionInfo && FunctionInfo->Name && FunctionInfo->Callback)
             {
                 AddedMethods.Add(UTF8_TO_TCHAR(FunctionInfo->Name));
-                Result->PrototypeTemplate()->Set(FV8Utils::InternalString(Isolate, FunctionInfo->Name), v8::FunctionTemplate::New(Isolate, FunctionInfo->Callback));
+                Result->PrototypeTemplate()->Set(FV8Utils::InternalString(Isolate, FunctionInfo->Name), v8::FunctionTemplate::New(Isolate, FunctionInfo->Callback,
+                    FunctionInfo->Data ? static_cast<v8::Local<v8::Value>>(v8::External::New(Isolate, FunctionInfo->Data)): v8::Local<v8::Value>()));
                 ++FunctionInfo;
             }
             FunctionInfo = ClassDefinition->Functions;
             while (FunctionInfo && FunctionInfo->Name && FunctionInfo->Callback)
             {
                 AddedFunctions.Add(UTF8_TO_TCHAR(FunctionInfo->Name));
-                Result->Set(FV8Utils::InternalString(Isolate, FunctionInfo->Name), v8::FunctionTemplate::New(Isolate, FunctionInfo->Callback));
+                Result->Set(FV8Utils::InternalString(Isolate, FunctionInfo->Name), v8::FunctionTemplate::New(Isolate, FunctionInfo->Callback,
+                    FunctionInfo->Data ? static_cast<v8::Local<v8::Value>>(v8::External::New(Isolate, FunctionInfo->Data)): v8::Local<v8::Value>()));
                 ++FunctionInfo;
             }
         }
 
-        InitTemplateProperties(Isolate, Struct, Result);
+        InitTemplateProperties(Isolate, Struct.Get(), Result);
 
-        if (Struct->IsA<UClass>())
+        if (const auto Class = Cast<UClass>(Struct.Get()))
         {
             for (TFieldIterator<UFunction> FuncIt(Class, EFieldIteratorFlags::ExcludeSuper); FuncIt; ++FuncIt)
             {
@@ -97,19 +153,38 @@ namespace puerts
                     continue;
                 }
 
-                auto FunctionTranslator = std::make_unique<FFunctionTranslator>(Function);
-
                 auto Key = FV8Utils::InternalString(Isolate, Function->GetName());
 
                 if (Function->HasAnyFunctionFlags(FUNC_Static))
                 {
+                    auto FunctionTranslator = GetFunctionTranslator(Function);
+                    AddedFunctions.Add(Function->GetName());
                     Result->Set(Key, FunctionTranslator->ToFunctionTemplate(Isolate));
                 }
                 else
                 {
+                    auto FunctionTranslator = GetMethodTranslator(Function, false);
+                    AddedMethods.Add(Function->GetName());
                     Result->PrototypeTemplate()->Set(Key, FunctionTranslator->ToFunctionTemplate(Isolate));
                 }
-                Functions.push_back(std::move(FunctionTranslator));
+            }
+
+            for (const FImplementedInterface& Interface : Class->Interfaces)
+            {
+                if (Interface.Class)
+                {
+                    for (TFieldIterator<UFunction> ItfFuncIt(Interface.Class, EFieldIteratorFlags::ExcludeSuper); ItfFuncIt; ++ItfFuncIt)
+                    {
+                        UFunction* ItfFunction = *ItfFuncIt;
+                        if (!ItfFunction->HasAnyFunctionFlags(FUNC_Static) && !AddedMethods.Contains(ItfFunction->GetName()))
+                        {
+                            auto ItfFunctionTranslator = GetMethodTranslator(ItfFunction, false);
+                            AddedMethods.Add(ItfFunction->GetName());
+                            Result->PrototypeTemplate()->Set(FV8Utils::InternalString(Isolate, ItfFunction->GetName()),
+                                ItfFunctionTranslator->ToFunctionTemplate(Isolate));
+                        }
+                    }
+                }
             }
 
             Result->Set(FV8Utils::InternalString(Isolate, "Find"), v8::FunctionTemplate::New(Isolate, Find, v8::External::New(Isolate, this)));
@@ -120,18 +195,73 @@ namespace puerts
         {
             UFunction* Function = *Iter;
 
-            auto FunctionTranslator = std::make_unique<FExtensionMethodTranslator>(Function);
+            if (AddedMethods.Contains(Function->GetName()))
+            {
+                continue;
+            }
+
+            auto FunctionTranslator = GetMethodTranslator(Function, true);
 
             auto Key = FV8Utils::InternalString(Isolate, Function->GetName());
 
+            AddedMethods.Add(Function->GetName());
             Result->PrototypeTemplate()->Set(Key, FunctionTranslator->ToFunctionTemplate(Isolate));
-
-            Functions.push_back(std::move(FunctionTranslator));
         }
 
         Result->Set(FV8Utils::InternalString(Isolate, "StaticClass"), v8::FunctionTemplate::New(Isolate, StaticClass, v8::External::New(Isolate, this)));
 
-        
+#ifndef WITH_QUICKJS
+        Result->InstanceTemplate()->SetHandler(v8::NamedPropertyHandlerConfiguration([](v8::Local<v8::Name> Property, const v8::PropertyCallbackInfo<v8::Value>& Info)
+        {
+            auto Isolate = Info.GetIsolate();
+            auto Context = Isolate->GetCurrentContext();
+            auto This = Info.This();
+            FName RequiredFName(*FV8Utils::ToFString(Info.GetIsolate(), Property));
+            auto FixedPropertyName = FV8Utils::ToV8String(Isolate, RequiredFName);
+            if (This->GetPrototype()->IsObject())
+            {
+                auto Proto = This->GetPrototype().As<v8::Object>();
+                if (Proto->Has(Context, FixedPropertyName).FromMaybe(false))
+                {
+                    Info.GetReturnValue().Set(This->Get(Context, FixedPropertyName).ToLocalChecked());
+                    auto DescriptorVal = Proto->GetOwnPropertyDescriptor(Context, FixedPropertyName).ToLocalChecked();
+                    if (DescriptorVal->IsObject())
+                    {
+                        auto Descriptor = DescriptorVal.As<v8::Object>();
+                        Proto->SetAccessorProperty(Property,
+                            Descriptor->Get(Context, FV8Utils::ToV8String(Isolate, "get")).ToLocalChecked().As<v8::Function>(),
+                            Descriptor->Get(Context, FV8Utils::ToV8String(Isolate, "set")).ToLocalChecked().As<v8::Function>());
+                    }
+                }
+            }
+        },
+        [](v8::Local<v8::Name> Property, v8::Local<v8::Value> Value,const v8::PropertyCallbackInfo<v8::Value>& Info)
+        {
+            auto Isolate = Info.GetIsolate();
+            auto Context = Isolate->GetCurrentContext();
+            auto This = Info.This();
+            FName RequiredFName(*FV8Utils::ToFString(Info.GetIsolate(), Property));
+            auto FixedPropertyName = FV8Utils::ToV8String(Isolate, RequiredFName);
+            if (This->GetPrototype()->IsObject())
+            {
+                auto Proto = This->GetPrototype().As<v8::Object>();
+                if (Proto->Has(Context, FixedPropertyName).FromMaybe(false))
+                {
+                    auto _UnUsed = This->Set(Context, FixedPropertyName, Value);
+                    auto DescriptorVal = Proto->GetOwnPropertyDescriptor(Context, FixedPropertyName).ToLocalChecked();
+                    if (DescriptorVal->IsObject())
+                    {
+                        auto Descriptor = DescriptorVal.As<v8::Object>();
+                        //set first, mush set accessor of object
+                        This->SetAccessorProperty(Property,
+                            Descriptor->Get(Context, FV8Utils::ToV8String(Isolate, "get")).ToLocalChecked().As<v8::Function>(),
+                            Descriptor->Get(Context, FV8Utils::ToV8String(Isolate, "set")).ToLocalChecked().As<v8::Function>());
+                    }
+                }
+            }
+        }, 
+        nullptr, nullptr, nullptr, v8::Local<v8::Value>(), v8::PropertyHandlerFlags::kNonMasking));
+#endif
 
         return HandleScope.Escape(Result);
     }
@@ -146,7 +276,7 @@ namespace puerts
 
         FStructWrapper * This = reinterpret_cast<FStructWrapper *>((v8::Local<v8::External>::Cast(Info.Data()))->Value());
 
-        auto Result = FV8Utils::IsolateData<IObjectMapper>(Isolate)->FindOrAdd(Isolate, Context, This->Struct->GetClass(), This->Struct);
+        auto Result = FV8Utils::IsolateData<IObjectMapper>(Isolate)->FindOrAdd(Isolate, Context, This->Struct->GetClass(), This->Struct.Get());
         Info.GetReturnValue().Set(Result);
     }
 
@@ -219,11 +349,6 @@ namespace puerts
         }
     }
 
-    v8::Local<v8::FunctionTemplate> FScriptStructWrapper::ToFunctionTemplate(v8::Isolate* Isolate)
-    {
-        return FStructWrapper::ToFunctionTemplate(Isolate, New);
-    }
-
     void FScriptStructWrapper::New(const v8::FunctionCallbackInfo<v8::Value>& Info)
     {
         v8::Isolate* Isolate = Info.GetIsolate();
@@ -258,14 +383,15 @@ namespace puerts
                 }
                 else
                 {
-                    Memory = Alloc(ScriptStruct);
-                    for (int i = 0; i < Properties.size(); ++i)
+                    Memory = Alloc(static_cast<UScriptStruct*>(Struct.Get()));
+                    const int Count = Info.Length() < Properties.size() ? Info.Length() : Properties.size();
+                    for (int i = 0; i < Count; ++i)
                     {
                         Properties[i]->JsToUEInContainer(Isolate, Context, Info[i], Memory, false);
                     }
                 }
             }
-            FV8Utils::IsolateData<IObjectMapper>(Isolate)->BindStruct(ScriptStruct, Memory, Self, PassByPointer);
+            FV8Utils::IsolateData<IObjectMapper>(Isolate)->BindStruct(this, Memory, Self, PassByPointer);
         }
         else
         {
@@ -275,32 +401,36 @@ namespace puerts
 
     void * FScriptStructWrapper::Alloc(UScriptStruct *InScriptStruct)
     {
-        UScriptStruct::ICppStructOps *CppStructOps = InScriptStruct->GetCppStructOps();
-        int32 Alignment = CppStructOps ? CppStructOps->GetAlignment() : InScriptStruct->GetMinAlignment();
-        void *ScriptStructMemory = FMemory::Malloc(InScriptStruct->GetStructureSize(), Alignment);
+        void *ScriptStructMemory = new char [InScriptStruct->GetStructureSize()];
         InScriptStruct->InitializeStruct(ScriptStructMemory);
         return ScriptStructMemory;
     }
 
-    void FScriptStructWrapper::OnGarbageCollectedWithFree(const v8::WeakCallbackInfo<UScriptStruct>& Data)
+    void FScriptStructWrapper::Free(TWeakObjectPtr<UStruct> InStruct, FinalizeFunc InExternalFinalize, void* Ptr)
     {
-        UScriptStruct *ScriptStruct = Data.GetParameter();
+        if (InExternalFinalize)
+        {
+            InExternalFinalize(Ptr);
+        }
+        else
+        {
+            if (InStruct.IsValid()) InStruct->DestroyStruct(Ptr);
+            delete[] static_cast<char*>(Ptr);
+        }
+    }
+
+    void FScriptStructWrapper::OnGarbageCollectedWithFree(const v8::WeakCallbackInfo<FScriptStructWrapper>& Data)
+    {
+        FScriptStructWrapper *ScriptStructWrapper = Data.GetParameter();
         void *ScriptStructMemory = DataTransfer::MakeAddressWithHighPartOfTwo(Data.GetInternalField(0), Data.GetInternalField(1));
-        FV8Utils::IsolateData<IObjectMapper>(Data.GetIsolate())->UnBindStruct(ScriptStruct, ScriptStructMemory);
-        ScriptStruct->DestroyStruct(ScriptStructMemory);
-        FMemory::Free(ScriptStructMemory);
+        FV8Utils::IsolateData<IObjectMapper>(Data.GetIsolate())->UnBindStruct(ScriptStructMemory);
+        Free(ScriptStructWrapper->Struct, ScriptStructWrapper->ExternalFinalize, ScriptStructMemory);
     }
 
     void  FScriptStructWrapper::OnGarbageCollected(const v8::WeakCallbackInfo<UScriptStruct>& Data)
     {
-        UScriptStruct *ScriptStruct = Data.GetParameter();
         void *ScriptStructMemory = DataTransfer::MakeAddressWithHighPartOfTwo(Data.GetInternalField(0), Data.GetInternalField(1));
-        FV8Utils::IsolateData<IObjectMapper>(Data.GetIsolate())->UnBindStruct(ScriptStruct, ScriptStructMemory);
-    }
-
-    v8::Local<v8::FunctionTemplate> FClassWrapper::ToFunctionTemplate(v8::Isolate* Isolate)
-    {
-        return FStructWrapper::ToFunctionTemplate(Isolate, New);
+        FV8Utils::IsolateData<IObjectMapper>(Data.GetIsolate())->UnBindStruct(ScriptStructMemory);
     }
 
     void FClassWrapper::OnGarbageCollected(const v8::WeakCallbackInfo<UClass>& Data)
@@ -328,7 +458,7 @@ namespace puerts
             auto Self = Info.This();
 
             UObject* Object = nullptr;
-
+            auto Class = static_cast<UClass*>(Struct.Get());
             
             if (Info.Length() == 1 && Info[0]->IsExternal()) //Call by Native
             {

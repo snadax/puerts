@@ -12,7 +12,7 @@
 #include "JSAnimGeneratedClass.h"
 #include "FunctionParametersDuplicate.h"
 
-UClass * UJSGeneratedClass::Create(const FString& Name, UClass *Parent, TSharedPtr<IDynamicInvoker> DynamicInvoker, v8::Isolate* Isolate, v8::Local<v8::Function> Constructor, v8::Local<v8::Object> Prototype)
+UClass * UJSGeneratedClass::Create(const FString& Name, UClass *Parent, TSharedPtr<puerts::IDynamicInvoker> DynamicInvoker, v8::Isolate* Isolate, v8::Local<v8::Function> Constructor, v8::Local<v8::Object> Prototype)
 {
     auto  Outer = GetTransientPackage();
     UClass *Class = nullptr;
@@ -78,7 +78,7 @@ void UJSGeneratedClass::StaticConstructor(const FObjectInitializer& ObjectInitia
     }
 }
 
-void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction * Super, v8::Local<v8::Function> JSImpl, TSharedPtr<IDynamicInvoker> DynamicInvoker, bool IsNative)
+void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction * Super, v8::Local<v8::Function> JSImpl, TSharedPtr<puerts::IDynamicInvoker> DynamicInvoker, bool IsNative)
 {
     bool Replace = Super->GetOuter() == Class;
     FName FunctionName = Super->GetFName();
@@ -87,7 +87,7 @@ void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction 
         if (auto MaybeJSFunction = Cast<UJSGeneratedFunction>(Super)) //这种情况只需简单替换下js函数
         {
             MaybeJSFunction->DynamicInvoker = DynamicInvoker;
-            MaybeJSFunction->FunctionTranslator = std::make_unique<puerts::FFunctionTranslator>(Super);
+            MaybeJSFunction->FunctionTranslator = std::make_unique<puerts::FFunctionTranslator>(Super, false);
             MaybeJSFunction->JsFunction.Reset(Isolate, JSImpl);
             MaybeJSFunction->SetNativeFunc(&UJSGeneratedFunction::execCallJS);
             return;
@@ -111,7 +111,6 @@ void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction 
 
     Function->ReturnValueOffset = MAX_uint16;
     Function->FirstPropertyToInit = NULL;
-    Function->Script.Add(EX_EndFunctionParms);
 
     if (!Replace)
     {
@@ -138,7 +137,7 @@ void UJSGeneratedClass::Override(v8::Isolate* Isolate, UClass *Class, UFunction 
 
     Function->JsFunction = v8::UniquePersistent<v8::Function>(Isolate, JSImpl);
     Function->DynamicInvoker = DynamicInvoker;
-    Function->FunctionTranslator = std::make_unique<puerts::FFunctionTranslator>(Function);
+    Function->FunctionTranslator = std::make_unique<puerts::FFunctionTranslator>(Function, false);
 
     if (Replace)
     {

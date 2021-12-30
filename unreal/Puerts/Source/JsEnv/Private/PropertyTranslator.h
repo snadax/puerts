@@ -13,6 +13,10 @@
 #include "CoreUObject.h"
 #include "PropertyMacros.h"
 
+#if ENGINE_MINOR_VERSION >= 25 || ENGINE_MAJOR_VERSION > 4
+#include "UObject/WeakFieldPtr.h"
+#endif
+
 #pragma warning(push, 0)  
 #include "libplatform/libplatform.h"
 #include "v8.h"
@@ -24,6 +28,8 @@ class FPropertyTranslator
 {
 public:
     static std::unique_ptr<FPropertyTranslator> Create(PropertyMacro *InProperty, bool IgnoreOut = false);
+
+    static void CreateOn(PropertyMacro *InProperty, FPropertyTranslator* InOldProperty);
 
     FORCEINLINE v8::Local<v8::Value> UEToJsInContainer(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const void *ContainerPtr, bool PassByPointer = false) const
     {
@@ -57,7 +63,18 @@ public:
 
     virtual bool IsOut() const { return false; }
 
-    explicit FPropertyTranslator(PropertyMacro *InProperty) : Property(InProperty), OwnerIsClass(InProperty->GetOwnerClass() != nullptr){ }
+    explicit FPropertyTranslator(PropertyMacro *InProperty) 
+    {
+        Init(InProperty);
+    }
+
+    FORCEINLINE void Init(PropertyMacro *InProperty)
+    {
+        Property = InProperty;
+        PropertyWeakPtr = InProperty;
+        OwnerIsClass = InProperty->GetOwnerClass() != nullptr;
+    }
+    
     virtual ~FPropertyTranslator() {}
 
     union
@@ -69,6 +86,7 @@ public:
         BoolPropertyMacro *BoolProperty;
         ObjectPropertyBaseMacro *ObjectBaseProperty;
         SoftObjectPropertyMacro *SoftObjectProperty;
+        SoftClassPropertyMacro *SoftClassProperty;
         InterfacePropertyMacro *InterfaceProperty;
         NamePropertyMacro *NameProperty;
         StrPropertyMacro *StringProperty;
@@ -79,19 +97,28 @@ public:
         StructPropertyMacro *StructProperty;
         DelegatePropertyMacro *DelegateProperty;
         MulticastDelegatePropertyMacro *MulticastDelegateProperty;
+        ClassPropertyMacro * ClassProperty;
     };
+
+#if ENGINE_MINOR_VERSION < 25 && ENGINE_MAJOR_VERSION < 5
+    TWeakObjectPtr<PropertyMacro> PropertyWeakPtr;
+#else
+    TWeakFieldPtr<PropertyMacro> PropertyWeakPtr;
+#endif
 
     bool OwnerIsClass;
 
-    static void Getter(v8::Local<v8::Name> Property, const v8::PropertyCallbackInfo<v8::Value>& Info);
+    std::unique_ptr<FPropertyTranslator> Inner;
 
-    void Getter(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const v8::PropertyCallbackInfo<v8::Value>& Info);
+    static void Getter(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
-    static void Setter(v8::Local<v8::Name> Property, v8::Local<v8::Value> Value, const v8::PropertyCallbackInfo<void>& Info);
+    void Getter(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const v8::FunctionCallbackInfo<v8::Value>& Info);
 
-    void Setter(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, v8::Local<v8::Value> Value, const v8::PropertyCallbackInfo<void>& Info);
+    static void Setter(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
-    static void DelegateGetter(v8::Local<v8::Name> Property, const v8::PropertyCallbackInfo<v8::Value>& Info);
+    void Setter(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, v8::Local<v8::Value> Value, const v8::FunctionCallbackInfo<v8::Value>& Info);
+
+    static void DelegateGetter(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
     void SetAccessor(v8::Isolate* Isolate, v8::Local<v8::FunctionTemplate> Template);
 };

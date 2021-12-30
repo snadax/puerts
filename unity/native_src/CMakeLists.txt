@@ -9,44 +9,37 @@ cmake_policy(SET CMP0091 NEW)
 
 project(PuertsPlugin)
 
-set (CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 14)
 
 if ( IOS )
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fembed-bitcode")
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fembed-bitcode")
 endif ()
 
-
 find_path(PUERTS_PROJECT_DIR NAMES SConstruct
     PATHS 
-    ${CMAKE_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}
     NO_DEFAULT_PATH
-    )
+)
 
 MARK_AS_ADVANCED(PUERTS_PROJECT_DIR)
 
-if ( JS_ENGINE STREQUAL "quickjs")
-    set(LIB_FILE_NAME libquickjs.a)
-else()
+if ( NOT DEFINED JS_ENGINE )
     set(JS_ENGINE v8)
-    set(LIB_FILE_NAME libwee8.a)
 endif()
 
-set(V8_ENGINE ${CMAKE_SOURCE_DIR}/${JS_ENGINE})
+set(ENGINE_ROOT ${PROJECT_SOURCE_DIR}/${JS_ENGINE})
+set(ENGINE_INC ${ENGINE_ROOT}/Inc)
 
-set(V8_INC ${V8_ENGINE}/Inc)
-
-set(ThirdParty ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/ThirdParty)
-set(WEBSOCKET_INC ${ThirdParty}/Include/websocketpp)
-set(ASIO_INC ${ThirdParty}/Include/asio)
+set(ThirdParty ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/ThirdParty)
 
 include_directories(
-    ${CMAKE_SOURCE_DIR}
-    ${V8_INC}
-    ${WEBSOCKET_INC}
-    ${ASIO_INC}
+    ${PROJECT_SOURCE_DIR}
+    ${ENGINE_INC}
+    ${ThirdParty}/Include/websocketpp
+    ${ThirdParty}/Include/asio
     Inc
-    ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private
+    ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private
 )
 
 set ( PUERTS_INC
@@ -54,16 +47,17 @@ set ( PUERTS_INC
     Inc/JSEngine.h
     Inc/V8Utils.h
     Inc/JSFunction.h
-    ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.h
-    ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/PromiseRejectCallback.hpp
+    ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.h
+    ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/PromiseRejectCallback.hpp
 )
 
 set ( PUERTS_SRC
     Src/Puerts.cpp
     Src/Log.cpp
     Src/JSEngine.cpp
+    Src/JSEngine_Eval.cpp
     Src/JSFunction.cpp
-    ${CMAKE_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.cpp
+    ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.cpp
 )
 
 macro(source_group_by_dir proj_dir source_files)
@@ -86,8 +80,9 @@ endmacro(source_group_by_dir)
 source_group_by_dir(${CMAKE_CURRENT_SOURCE_DIR} PUERTS_INC)
 source_group_by_dir(${CMAKE_CURRENT_SOURCE_DIR} PUERTS_SRC)
 
+
 if ( APPLE )
-    if ( IOS)
+    if ( IOS )
         set(CMAKE_OSX_ARCHITECTURES "$(ARCHS_STANDARD)")
         add_library(puerts STATIC
            ${PUERTS_SRC} ${PUERTS_INC}
@@ -98,16 +93,11 @@ if ( APPLE )
         # 某些mac机器上会默认开始编译arm64版本，暂时先写死x86版本，后续再支持arm64
         set(CMAKE_OSX_ARCHITECTURES x86_64)
 
-        if ( FOR_UT STREQUAL "1")
-            add_library(puerts SHARED
-                ${PUERTS_SRC} ${PUERTS_INC}
-            )
-        else ()
-            add_library(puerts MODULE
-                ${PUERTS_SRC} ${PUERTS_INC}
-            )
-            set_target_properties ( puerts PROPERTIES BUNDLE TRUE )
-        endif ()
+        set(CMAKE_SKIP_RPATH FALSE)    
+        set(CMAKE_INSTALL_RPATH "@loader_path/")
+        add_library(puerts SHARED
+            ${PUERTS_SRC} ${PUERTS_INC}
+        )
     endif ()
 else ()
     add_library(puerts SHARED
@@ -119,71 +109,63 @@ if ( WIN32 AND NOT CYGWIN )
     target_compile_definitions (puerts PRIVATE BUILDING_V8_SHARED)
 endif ()
 
-if ( JS_ENGINE STREQUAL "quickjs")
-    target_compile_definitions (puerts PRIVATE WITHOUT_INSPECTOR)
-    target_compile_definitions (puerts PRIVATE WITH_QUICKJS)
-endif ()
+include(${PROJECT_SOURCE_DIR}/cmake/${JS_ENGINE}/CMakeLists.txt)
 
-if ( MSYS )
+if ( MSYS OR WIN32 )
+    if ( WIN32 ) 
+        target_link_libraries(puerts
+            winmm.lib
+            dbghelp.lib
+            shlwapi.lib
+        )
+    endif ()
+    
+    # link
     if("${CMAKE_SIZEOF_VOID_P}" STREQUAL "4")
-        target_link_libraries(puerts
-            ${V8_ENGINE}/Lib/Win32/${LIB_FILE_NAME}
-        )
+        foreach(LIB_FILE_NAME IN LISTS LIB_FILE_NAMES)
+            target_link_libraries(puerts
+                ${ENGINE_ROOT}/Lib/Win32/${LIB_FILE_NAME}
+            )
+        endforeach()
     else ()
-        target_link_libraries(puerts
-            ${V8_ENGINE}/Lib/Win64/${LIB_FILE_NAME}
-        )
+        foreach(LIB_FILE_NAME IN LISTS LIB_FILE_NAMES)
+            target_link_libraries(puerts
+                ${ENGINE_ROOT}/Lib/Win64/${LIB_FILE_NAME}
+            )
+        endforeach()
     endif ()
+
+    # definition
     target_compile_definitions (puerts PRIVATE PLATFORM_WINDOWS)
-elseif ( WIN32 )
-    if ( JS_ENGINE STREQUAL "quickjs")
-        if("${CMAKE_SIZEOF_VOID_P}" STREQUAL "4")
-            target_link_libraries(puerts
-                ${V8_ENGINE}/Lib/Win32/quickjs.dll.lib
-                winmm.lib
-                dbghelp.lib
-                shlwapi.lib
-            )
-        else ()
-            target_link_libraries(puerts
-                ${V8_ENGINE}/Lib/Win64/quickjs.dll.lib
-                winmm.lib
-                dbghelp.lib
-                shlwapi.lib
-            )
-        endif ()
-    else ()
-        if("${CMAKE_SIZEOF_VOID_P}" STREQUAL "4")
-            target_link_libraries(puerts
-                ${V8_ENGINE}/Lib/Win32/wee8.lib
-                winmm.lib
-                dbghelp.lib
-                shlwapi.lib
-            )
-        else ()
-            target_link_libraries(puerts
-                ${V8_ENGINE}/Lib/Win64/wee8.lib
-                winmm.lib
-                dbghelp.lib
-                shlwapi.lib
-            )
-        endif ()
-    endif ()
-    target_compile_definitions (puerts PRIVATE PLATFORM_WINDOWS)
+
 elseif ( ANDROID )
-    find_library(log-lib log )
+
+    find_library(log-lib log)
+    target_link_libraries(puerts
+        ${log-lib}
+    )
 
     if( ANDROID_ABI STREQUAL "armeabi-v7a")
-        target_link_libraries(puerts
-            ${V8_ENGINE}/Lib/Android/armeabi-v7a/${LIB_FILE_NAME}
-            ${log-lib}
-        )
+        # link
+        foreach(LIB_FILE_NAME IN LISTS LIB_FILE_NAMES)
+            target_link_libraries(puerts
+                ${ENGINE_ROOT}/Lib/Android/armeabi-v7a/${LIB_FILE_NAME}
+            )
+        endforeach()
+
+        # definition
         target_compile_definitions (puerts PRIVATE PLATFORM_ANDROID_ARM)
+
     else ()
-        target_link_libraries(puerts
-            ${V8_ENGINE}/Lib/Android/arm64-v8a/${LIB_FILE_NAME}
-            ${log-lib}
-        )
+        # link
+        foreach(LIB_FILE_NAME IN LISTS LIB_FILE_NAMES)
+            target_link_libraries(puerts
+                ${ENGINE_ROOT}/Lib/Android/arm64-v8a/${LIB_FILE_NAME}
+                ${log-lib}
+            )
+        endforeach()
+        
+        # definition
         target_compile_definitions (puerts PRIVATE PLATFORM_ANDROID_ARM64)
     endif ()
 
@@ -194,18 +176,49 @@ elseif ( ANDROID )
             COMMAND "${ANDROID_TOOLCHAIN_PREFIX}strip" -g -S -d --strip-debug --verbose
             "${CMAKE_BINARY_DIR}/libpuerts.so"
             COMMENT "Strip debug symbols done on final binary.")
+
 elseif ( APPLE )
+
     if ( IOS )
-        target_compile_definitions (puerts PRIVATE PLATFORM_IOS)
+        #definition
+        if(PLATFORM STREQUAL "SIMULATOR64")
+            target_compile_definitions (puerts PRIVATE PLATFORM_IOS_SIMULATOR)
+            message(STATUS "SIMULATOR64 BUILD...")
+        else ()
+            target_compile_definitions (puerts PRIVATE PLATFORM_IOS)
+        endif ()
+
     else ()
-        target_link_libraries(puerts
-            ${V8_ENGINE}/Lib/macOS/${LIB_FILE_NAME}
-        )
+        # link
+        foreach(LIB_FILE_NAME IN LISTS LIB_FILE_NAMES)
+            target_link_libraries(puerts
+                ${ENGINE_ROOT}/Lib/macOS/${LIB_FILE_NAME}
+            )
+        endforeach()
+    
+        #definition
         target_compile_definitions (puerts PRIVATE PLATFORM_MAC)
     endif ()
+
+elseif (UNIX)
+    # link
+    foreach(LIB_FILE_NAME IN LISTS LIB_FILE_NAMES)
+        target_link_libraries(puerts
+            ${ENGINE_ROOT}/Lib/Linux/${LIB_FILE_NAME}
+            pthread
+        )
+    endforeach()
+    
+    # definition
+    target_compile_definitions (puerts PRIVATE PLATFORM_LINUX)
+    set(CMAKE_CXX_COMPILER "clang++")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
 endif ()
 
 if ( WIN32 AND NOT CYGWIN AND NOT ( CMAKE_SYSTEM_NAME STREQUAL "WindowsStore" ) AND NOT ANDROID AND NOT MSYS)
 	set_property(TARGET puerts PROPERTY
              MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
+
+install(TARGETS puerts DESTINATION bin)

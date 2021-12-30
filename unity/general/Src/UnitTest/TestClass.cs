@@ -91,6 +91,10 @@ namespace Puerts.UnitTest
                 baseArr[i] = value;
             }
         }
+
+        public void ActionParam(System.Action action)
+        {
+        }
     }
 
     public class DerivedClass : BaseClass
@@ -278,6 +282,11 @@ namespace Puerts.UnitTest
             y = new ISubA();
             y.cmpTarget = 100;
         }
+
+        public void OutString(out string str)
+        {
+            str = null;
+        }
     }
 
     public delegate string MyCallBack(string str);
@@ -327,6 +336,11 @@ namespace Puerts.UnitTest
         }
 
         public JSObject passThroughJSObject(JSObject obj) 
+        {
+            return obj;
+        }
+
+        public object passThroughJSObjectInAnyFunction(object obj) 
         {
             return obj;
         }
