@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdio>
+#include <functional>
 
 #include "Modules/ModuleManager.h"
 #include "CoreMinimal.h"
@@ -25,8 +26,26 @@ public:
         return FModuleManager::Get().IsModuleLoaded("Puerts");
     }
 
+#if WITH_EDITOR
+    static inline bool IsInPIEMode()
+    {
+        return Get().IsInPIE();
+    }
+#endif
+
     virtual bool IsEnabled() = 0;
 
-    virtual void ReloadJsModule(FName ModuleName) = 0;
+    virtual bool IsWatchEnabled() = 0;
 
+    virtual void ReloadModule(FName ModuleName, const FString& JsSource) = 0;
+
+    virtual void InitExtensionMethodsMap() = 0;
+
+    virtual void SetJsEnvSelector(std::function<int(UObject*, int)> InSelector) = 0;
+
+    virtual void MakeSharedJsEnv() = 0;
+
+#if WITH_EDITOR
+    virtual bool IsInPIE() = 0;
+#endif
 };

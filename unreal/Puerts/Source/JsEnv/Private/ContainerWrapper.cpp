@@ -10,15 +10,6 @@
 
 namespace puerts
 {
-    FORCEINLINE static int32 GetKeyOffset(const FScriptMapLayout &ScriptMapLayout)
-    {
-#if ENGINE_MINOR_VERSION < 22
-        return ScriptMapLayout.KeyOffset;
-#else
-        return 0;
-#endif
-    }
-
     v8::Local<v8::FunctionTemplate> FScriptArrayWrapper::ToFunctionTemplate(v8::Isolate* Isolate)
     {
         v8::Isolate::Scope Isolatescope(Isolate);
@@ -47,8 +38,13 @@ namespace puerts
 
         if (Info.Length() > 0)
         {
-            auto Self = FV8Utils::GetPoninterFast<FScriptArray>(Info.Holder(), 0);
-            auto Inner = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
+            auto Self = FV8Utils::GetPointerFast<FScriptArray>(Info.Holder(), 0);
+            auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+            if (!Inner->PropertyWeakPtr.IsValid())
+            {
+                FV8Utils::ThrowException(Isolate, "item info is invalid!");
+                return;
+            }
             
             int32 Index = AddUninitialized(Self, Inner->Property->GetSize(), Info.Length());
             for (int i = 0; i < Info.Length(); ++i)
@@ -69,8 +65,13 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptArray>(Info.Holder(), 0);
-        auto Inner = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
+        auto Self = FV8Utils::GetPointerFast<FScriptArray>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
             
         int Index = Info[0]->Int32Value(Context).ToChecked();
         if (Index < 0 || Index >= Self->Num())
@@ -79,7 +80,7 @@ namespace puerts
             return;
         }
         uint8 *DataPtr = GetData(Self, Inner->Property->GetSize(), Index);
-        Info.GetReturnValue().Set(Inner->UEToJs(Isolate, Context, DataPtr, true));
+        Info.GetReturnValue().Set(Inner->UEToJs(Isolate, Context, DataPtr, false));
     }
 
     void FScriptArrayWrapper::Set(const v8::FunctionCallbackInfo<v8::Value>& Info)
@@ -90,8 +91,13 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(2);
         
-        auto Self = FV8Utils::GetPoninterFast<FScriptArray>(Info.Holder(), 0);
-        auto Inner = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
+        auto Self = FV8Utils::GetPointerFast<FScriptArray>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
         
         int Index = Info[0]->Int32Value(Context).ToChecked();
         if (Index < 0 || Index >= Self->Num())
@@ -126,9 +132,13 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
         
-        auto Self = FV8Utils::GetPoninterFast<FScriptArray>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<FScriptArray>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
 
         int32 Index = Info[0]->Int32Value(Context).ToChecked();
         if (Index < 0 || Index >= Self->Num())
@@ -138,8 +148,8 @@ namespace puerts
         }
         else
         {
-            Destruct(Self, PropertyTranslator, Index, 1);
-            Self->Remove(Index, 1, Property->GetSize());
+            FScriptArrayEx::Destruct(Self, Inner->Property, Index, 1);
+            Self->Remove(Index, 1, Inner->Property->GetSize());
         }
     }
 
@@ -151,7 +161,7 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptArray>(Info.Holder(), 0);
+        auto Self = FV8Utils::GetPointerFast<FScriptArray>(Info.Holder(), 0);
         int32 Index = Info[0]->Int32Value(Context).ToChecked();
         Info.GetReturnValue().Set(Self->IsValidIndex(Index));
     }
@@ -162,12 +172,15 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptArray>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<FScriptArray>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
 
-        Destruct(Self, PropertyTranslator, 0, Self->Num());
-        Self->Empty(0, Property->GetSize());
+        FScriptArrayEx::Empty(Self, Inner->Property);
     }
 
     FORCEINLINE int32 FScriptArrayWrapper::AddUninitialized(FScriptArray *ScriptArray, int32 ElementSize, int32 Count)
@@ -191,30 +204,24 @@ namespace puerts
         }
     }
 
-    FORCEINLINE void FScriptArrayWrapper::Destruct(FScriptArray *ScriptArray, FPropertyTranslator *Inner, int32 Index, int32 Count)
-    {
-        int32 ElementSize = Inner->Property->GetSize();
-        uint8 *Dest = GetData(ScriptArray, ElementSize, Index);
-        for (int32 i = 0; i < Count; ++i)
-        {
-            Inner->Property->DestroyValue(Dest);
-            Dest += ElementSize;
-        }
-    }
-
     int32 FScriptArrayWrapper::FindIndexInner(const v8::FunctionCallbackInfo<v8::Value>& Info)
     {
         v8::Isolate* Isolate = Info.GetIsolate();
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptArray>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<FScriptArray>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return INDEX_NONE;
+        }
+        auto Property = Inner->Property;
 
         void* Dest = FMemory_Alloca(Property->GetSize());
         Property->InitializeValue(Dest);
-        PropertyTranslator->JsToUE(Isolate, Context, Info[0], Dest, false);
+        Inner->JsToUE(Isolate, Context, Info[0], Dest, false);
 
         const int32 Num = Self->Num();
         int32 Result = INDEX_NONE;
@@ -261,13 +268,18 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptSet>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<FScriptSet>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
+        auto Property = Inner->Property;
 
         void* DataPtr = FMemory_Alloca(Property->GetSize());
         Property->InitializeValue(DataPtr);
-        PropertyTranslator->JsToUE(Isolate, Context, Info[0], DataPtr, false);
+        Inner->JsToUE(Isolate, Context, Info[0], DataPtr, false);
 
         auto ScriptLayout = FScriptSet::GetScriptLayout(Property->GetSize(), Property->GetMinAlignment());
         Self->Add(DataPtr, ScriptLayout,
@@ -291,9 +303,14 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptSet>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<FScriptSet>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
+        auto Property = Inner->Property;
 
         int32 Index = Info[0]->Int32Value(Context).ToChecked();
         if (Self->IsValidIndex(Index) == false)
@@ -304,7 +321,7 @@ namespace puerts
         {
             auto ScriptLayout = FScriptSet::GetScriptLayout(Property->GetSize(), Property->GetMinAlignment());
             void* Data = Self->GetData(Index, ScriptLayout);
-            Info.GetReturnValue().Set(PropertyTranslator->UEToJs(Isolate, Context, Data, true));
+            Info.GetReturnValue().Set(Inner->UEToJs(Isolate, Context, Data, false));
         }
     }
 
@@ -330,9 +347,14 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptSet>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<FScriptSet>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
+        auto Property = Inner->Property;
 
         int32 Index = Info[0]->Int32Value(Context).ToChecked();
         if (Self->IsValidIndex(Index) == false)
@@ -343,7 +365,7 @@ namespace puerts
         {
             auto ScriptLayout = FScriptSet::GetScriptLayout(Property->GetSize(), Property->GetMinAlignment());
             void* Data = Self->GetData(Index, ScriptLayout);
-            Destruct(Self, PropertyTranslator, Index, 1);
+            FScriptSetEx::Destruct(Self, Property, Index, 1);
             Self->RemoveAt(Index, ScriptLayout);
         }
     }
@@ -354,7 +376,7 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptSet>(Info.Holder(), 0);
+        auto Self = FV8Utils::GetPointerFast<FScriptSet>(Info.Holder(), 0);
         uint32 Result = Self->GetMaxIndex();
         Info.GetReturnValue().Set(Result);
     }
@@ -367,7 +389,7 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptSet>(Info.Holder(), 0);
+        auto Self = FV8Utils::GetPointerFast<FScriptSet>(Info.Holder(), 0);
         int32 Index = Info[0]->Int32Value(Context).ToChecked();
         uint32 Result = Self->IsValidIndex(Index);
         Info.GetReturnValue().Set(Result);
@@ -379,28 +401,15 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptSet>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
-
-        auto ScriptLayout = FScriptSet::GetScriptLayout(Property->GetSize(), Property->GetMinAlignment());
-        Destruct(Self, PropertyTranslator, 0, Self->Num());
-        Self->Empty(0, ScriptLayout);
-    }
-
-    void FScriptSetWrapper::Destruct(FScriptSet *ScriptSet, FPropertyTranslator *Inner, int32 Index, int32 Count)
-    {
-        int32 MaxIndex = ScriptSet->GetMaxIndex();
-        auto Property = Inner->Property;
-        auto SetLayout = ScriptSet->GetScriptLayout(Property->GetSize(), Property->GetMinAlignment());
-        for (int32 i = Index; i < Index + Count; ++i)
+        auto Self = FV8Utils::GetPointerFast<FScriptSet>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
         {
-            if (ScriptSet->IsValidIndex(i))
-            {
-                void* Data = ScriptSet->GetData(i, SetLayout);
-                Property->DestroyValue(Data);
-            }
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
         }
+
+        FScriptSetEx::Empty(Self, Inner->Property);
     }
 
     int32 FScriptSetWrapper::FindIndexInner(const v8::FunctionCallbackInfo<v8::Value>& Info)
@@ -409,14 +418,19 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptSet>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<FScriptSet>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return INDEX_NONE;
+        }
+        auto Property = Inner->Property;
 
         void* DataPtr = FMemory_Alloca(Property->GetSize());
         Property->InitializeValue(DataPtr);
 
-        PropertyTranslator->JsToUE(Isolate, Context, Info[0], DataPtr, false);
+        Inner->JsToUE(Isolate, Context, Info[0], DataPtr, false);
 
         auto ScriptLayout = FScriptSet::GetScriptLayout(Property->GetSize(), Property->GetMinAlignment());
 
@@ -457,11 +471,16 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(2);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptMap>(Info.Holder(), 0);
-        auto KeyPropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
+        auto Self = FV8Utils::GetPointerFast<FScriptMap>(Info.Holder(), 0);
+        auto KeyPropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
         auto KeyProperty = KeyPropertyTranslator->Property;
-        auto ValuePropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 2);
+        auto ValuePropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 2);
         auto ValueProperty = ValuePropertyTranslator->Property;
+        if (!KeyPropertyTranslator->PropertyWeakPtr.IsValid() || !ValuePropertyTranslator->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "key/value info is invalid!");
+            return;
+        }
 
         void* KeyPtr = FMemory_Alloca(KeyProperty->GetSize());
         KeyProperty->InitializeValue(KeyPtr);
@@ -512,11 +531,16 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptMap>(Info.Holder(), 0);
-        auto KeyPropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
+        auto Self = FV8Utils::GetPointerFast<FScriptMap>(Info.Holder(), 0);
+        auto KeyPropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
         auto KeyProperty = KeyPropertyTranslator->Property;
-        auto ValuePropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 2);
+        auto ValuePropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 2);
         auto ValueProperty = ValuePropertyTranslator->Property;
+        if (!KeyPropertyTranslator->PropertyWeakPtr.IsValid() || !ValuePropertyTranslator->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "key/value info is invalid!");
+            return;
+        }
 
         void* KeyPtr = FMemory_Alloca(KeyProperty->GetSize());
         KeyProperty->InitializeValue(KeyPtr);
@@ -531,7 +555,7 @@ namespace puerts
 
         if (ValuePtr)
         {
-            Info.GetReturnValue().Set(ValuePropertyTranslator->UEToJs(Isolate, Context, ValuePtr, true));
+            Info.GetReturnValue().Set(ValuePropertyTranslator->UEToJs(Isolate, Context, ValuePtr, false));
         }
         KeyProperty->DestroyValue(KeyPtr);
     }
@@ -549,11 +573,16 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptMap>(Info.Holder(), 0);
-        auto KeyPropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
+        auto Self = FV8Utils::GetPointerFast<FScriptMap>(Info.Holder(), 0);
+        auto KeyPropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
         auto KeyProperty = KeyPropertyTranslator->Property;
-        auto ValuePropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 2);
+        auto ValuePropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 2);
         auto ValueProperty = ValuePropertyTranslator->Property;
+        if (!KeyPropertyTranslator->PropertyWeakPtr.IsValid() || !ValuePropertyTranslator->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "key/value info is invalid!");
+            return;
+        }
 
         void* KeyPtr = FMemory_Alloca(KeyProperty->GetSize());
         KeyProperty->InitializeValue(KeyPtr);
@@ -570,7 +599,7 @@ namespace puerts
         }
         else
         {
-            Destruct(Self, KeyPropertyTranslator, ValuePropertyTranslator, Index, 1);
+            FScriptMapEx::Destruct(Self, KeyProperty, ValueProperty, Index, 1);
             Self->RemoveAt(Index, ScriptLayout);
         }
         KeyProperty->DestroyValue(KeyPtr);
@@ -582,7 +611,7 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptMap>(Info.Holder(), 0);
+        auto Self = FV8Utils::GetPointerFast<FScriptMap>(Info.Holder(), 0);
         int32 Result = Self->GetMaxIndex();
         Info.GetReturnValue().Set(Result);
     }
@@ -595,7 +624,7 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptMap>(Info.Holder(), 0);
+        auto Self = FV8Utils::GetPointerFast<FScriptMap>(Info.Holder(), 0);
         int32 Index = Info[0]->Int32Value(Context).ToChecked();
         Info.GetReturnValue().Set(Self->IsValidIndex(Index));
     }
@@ -608,7 +637,7 @@ namespace puerts
 
         CHECK_V8_ARGS_LEN(1);
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptMap>(Info.Holder(), 0);
+        auto Self = FV8Utils::GetPointerFast<FScriptMap>(Info.Holder(), 0);
         int32 Index = Info[0]->Int32Value(Context).ToChecked();
         if (Self->IsValidIndex(Index) == false)
         {
@@ -617,14 +646,20 @@ namespace puerts
         }
         else
         {
-            auto KeyPropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
+            auto KeyPropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
             auto KeyProperty = KeyPropertyTranslator->Property;
-            auto ValuePropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 2);
+            auto ValuePropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 2);
             auto ValueProperty = ValuePropertyTranslator->Property;
+            if (!KeyPropertyTranslator->PropertyWeakPtr.IsValid() || !ValuePropertyTranslator->PropertyWeakPtr.IsValid())
+            {
+                FV8Utils::ThrowException(Isolate, "key/value info is invalid!");
+                return;
+            }
+            
             auto ScriptLayout = GetScriptLayout(KeyProperty, ValueProperty);
             uint8* Data = reinterpret_cast<uint8*>(Self->GetData(Index, ScriptLayout));
             void* KeyPtr = Data + GetKeyOffset(ScriptLayout);
-            Info.GetReturnValue().Set(KeyPropertyTranslator->UEToJs(Isolate, Context, KeyPtr, true));
+            Info.GetReturnValue().Set(KeyPropertyTranslator->UEToJs(Isolate, Context, KeyPtr, false));
         }
     }
     
@@ -634,33 +669,18 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<FScriptMap>(Info.Holder(), 0);
-        auto KeyPropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
+        auto Self = FV8Utils::GetPointerFast<FScriptMap>(Info.Holder(), 0);
+        auto KeyPropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
         auto KeyProperty = KeyPropertyTranslator->Property;
-        auto ValuePropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 2);
+        auto ValuePropertyTranslator = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 2);
         auto ValueProperty = ValuePropertyTranslator->Property;
-        auto ScriptLayout = GetScriptLayout(KeyProperty, ValueProperty);
-        Destruct(Self, KeyPropertyTranslator, ValuePropertyTranslator, 0, Self->Num());
-        Self->Empty(0, ScriptLayout);
-    }
-
-    void FScriptMapWrapper::Destruct(FScriptMap *ScriptMap, FPropertyTranslator *KeyTranslator, FPropertyTranslator *ValueTranslator, int32 Index, int32 Count)
-    {
-        int32 MaxIndex = ScriptMap->GetMaxIndex();
-        auto KeyProperty = KeyTranslator->Property;
-        auto ValueProperty = ValueTranslator->Property;
-        auto MapLayout = GetScriptLayout(KeyProperty, ValueProperty);
-        for (int32 i = Index; i < Index + Count; ++i)
+        if (!KeyPropertyTranslator->PropertyWeakPtr.IsValid() || !ValuePropertyTranslator->PropertyWeakPtr.IsValid())
         {
-            if (ScriptMap->IsValidIndex(i))
-            {
-                uint8* Data = reinterpret_cast<uint8*>(ScriptMap->GetData(i, MapLayout));
-                void* Key = Data + GetKeyOffset(MapLayout);
-                void* Value = Data + MapLayout.ValueOffset;
-                KeyProperty->DestroyValue(Key);
-                ValueProperty->DestroyValue(Value);
-            }
+            FV8Utils::ThrowException(Isolate, "key/value info is invalid!");
+            return;
         }
+        
+        FScriptMapEx::Empty(Self, KeyProperty, ValueProperty);
     }
 
     FScriptMapLayout FScriptMapWrapper::GetScriptLayout(const PropertyMacro* KeyProperty, const PropertyMacro* ValueProperty)
@@ -690,8 +710,13 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        Info.GetReturnValue().Set(PropertyTranslator->Property->ArrayDim);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
+        Info.GetReturnValue().Set(Inner->Property->ArrayDim);
     }
 
     void FFixSizeArrayWrapper::Get(const v8::FunctionCallbackInfo<v8::Value>& Info)
@@ -700,9 +725,14 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<uint8>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<uint8>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
+        auto Property = Inner->Property;
 
         int32 Index = -1;
 
@@ -719,7 +749,7 @@ namespace puerts
 
         auto Ptr = Self + Property->ElementSize * Index;
 
-        Info.GetReturnValue().Set(PropertyTranslator->UEToJs(Isolate, Context, Ptr, true));
+        Info.GetReturnValue().Set(Inner->UEToJs(Isolate, Context, Ptr, false));
     }
 
     void FFixSizeArrayWrapper::Set(const v8::FunctionCallbackInfo<v8::Value>& Info)
@@ -728,9 +758,14 @@ namespace puerts
         v8::HandleScope HandleScope(Isolate);
         v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-        auto Self = FV8Utils::GetPoninterFast<uint8>(Info.Holder(), 0);
-        auto PropertyTranslator = FV8Utils::GetPoninterFast<FPropertyTranslator>(Info.Holder(), 1);
-        auto Property = PropertyTranslator->Property;
+        auto Self = FV8Utils::GetPointerFast<uint8>(Info.Holder(), 0);
+        auto Inner = FV8Utils::GetPointerFast<FPropertyTranslator>(Info.Holder(), 1);
+        if (!Inner->PropertyWeakPtr.IsValid())
+        {
+            FV8Utils::ThrowException(Isolate, "item info is invalid!");
+            return;
+        }
+        auto Property = Inner->Property;
 
         int32 Index = -1;
 
@@ -747,6 +782,6 @@ namespace puerts
 
         auto Ptr = Self + Property->ElementSize * Index;
 
-        PropertyTranslator->JsToUE(Isolate, Context, Info[1], Ptr, true);
+        Inner->JsToUE(Isolate, Context, Info[1], Ptr, true);
     }
 }

@@ -35,6 +35,14 @@ public:
     bool CallFunction(float);
 
     void SetDelegateHandle(FDelegateHandle* Handle);
+
+    bool IsCalling = false;
+
+    bool FunctionContinue;
+
+#ifdef SINGLE_THREAD_VERIFY
+    uint32 BoundThreadId;
+#endif
     
 private:
     v8::Isolate* Isolate;
@@ -53,8 +61,6 @@ private:
     v8::Global<v8::Context>& GetContext();
 
     v8::Global<v8::Function>& GetFunction();
-
-    const bool FunctionContinue;
 
     FDelegateHandle* DelegateHandle;
 };

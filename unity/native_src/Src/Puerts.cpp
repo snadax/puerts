@@ -4,12 +4,11 @@
 * Puerts is licensed under the BSD 3-Clause License, except for the third-party components listed in the file 'LICENSE' which may be subject to their corresponding license terms.
 * This file is subject to the terms and conditions defined in file 'LICENSE', which is part of this source code package.
 */
-
 #include "JSEngine.h"
 #include <cstring>
 #include "V8Utils.h"
 
-#define LIB_VERSION 11
+#define LIB_VERSION 14
 
 using puerts::JSEngine;
 using puerts::FValue;
@@ -26,6 +25,17 @@ extern "C" {
 V8_EXPORT int GetLibVersion()
 {
     return LIB_VERSION;
+}
+
+V8_EXPORT int GetLibBackend()
+{
+#if WITH_NODEJS
+    return puerts::JSEngineBackend::Node;
+#elif WITH_QUICKJS
+    return puerts::JSEngineBackend::QuickJS;
+#else
+    return puerts::JSEngineBackend::V8;
+#endif
 }
 
 V8_EXPORT v8::Isolate *CreateJSEngine()
@@ -56,6 +66,26 @@ V8_EXPORT void SetGlobalFunction(v8::Isolate *Isolate, const char *Name, CSharpF
     JsEngine->SetGlobalFunction(Name, Callback, Data);
 }
 
+V8_EXPORT void SetModuleResolver(v8::Isolate *Isolate, CSharpModuleResolveCallback Resolver, int32_t Idx)
+{
+    auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+    JsEngine->ModuleResolver = Resolver;
+    JsEngine->Idx = Idx;
+}
+
+V8_EXPORT FResultInfo * ExecuteModule(v8::Isolate *Isolate, const char* Path)
+{
+    auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+    if (JsEngine->ExecuteModule(Path))
+    {
+        return &(JsEngine->ResultInfo);
+    }
+    else
+    {
+        return nullptr;
+    }
+}
+
 V8_EXPORT FResultInfo * Eval(v8::Isolate *Isolate, const char *Code, const char* Path)
 {
     auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
@@ -69,7 +99,7 @@ V8_EXPORT FResultInfo * Eval(v8::Isolate *Isolate, const char *Code, const char*
     }
 }
 
-V8_EXPORT int RegisterClass(v8::Isolate *Isolate, int BaseTypeId, const char *FullName, CSharpConstructorCallback Constructor, CSharpDestructorCallback Destructor, int64_t Data)
+V8_EXPORT int _RegisterClass(v8::Isolate *Isolate, int BaseTypeId, const char *FullName, CSharpConstructorCallback Constructor, CSharpDestructorCallback Destructor, int64_t Data)
 {
     auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
     return JsEngine->RegisterClass(FullName, BaseTypeId, Constructor, Destructor, Data, 0);
@@ -844,6 +874,12 @@ V8_EXPORT int InspectorTick(v8::Isolate *Isolate)
 {
     auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
     return JsEngine->InspectorTick() ? 1 : 0;
+}
+
+V8_EXPORT void LogicTick(v8::Isolate *Isolate)
+{
+    auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+    return JsEngine->LogicTick();
 }
 
 //-------------------------- end debug --------------------------

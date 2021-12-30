@@ -23,7 +23,10 @@ call git restore *
 cd ..\..\..\
 call gclient sync
 
-node %~dp0\patch_array_new.js  src\utils\allocation.h
+@REM echo =====[ Patching V8 ]=====
+@REM node %GITHUB_WORKSPACE%\v8-build\CRLF2LF.js %GITHUB_WORKSPACE%\v8-build\patch\builtins-puerts.patch
+@REM call git apply --cached --reject %GITHUB_WORKSPACE%\v8-build\patch\builtins-puerts.patch
+@REM call git checkout -- .
 
 echo =====[ Make dynamic_crt ]=====
 node %~dp0\rep.js  build\config\win\BUILD.gn

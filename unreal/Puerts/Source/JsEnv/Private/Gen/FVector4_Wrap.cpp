@@ -44,7 +44,7 @@ static void* _FVector4New_(const v8::FunctionCallbackInfo<v8::Value>& Info)
             Info[1]->IsNumber())
         {
             
-            const FVector* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector>(Info[0]->ToObject(Context).ToLocalChecked());
+            const FVector* Arg0 = puerts::DataTransfer::GetPointerFast<FVector>(Info[0]->ToObject(Context).ToLocalChecked());
             float Arg1 = Info[1]->ToNumber(Context).ToLocalChecked()->Value();
             FVector4* Obj = new FVector4(*Arg0, Arg1);
             
@@ -62,7 +62,7 @@ static void* _FVector4New_(const v8::FunctionCallbackInfo<v8::Value>& Info)
             )
         {
             
-            const FLinearColor* Arg0 = puerts::DataTransfer::GetPoninterFast<FLinearColor>(Info[0]->ToObject(Context).ToLocalChecked());
+            const FLinearColor* Arg0 = puerts::DataTransfer::GetPointerFast<FLinearColor>(Info[0]->ToObject(Context).ToLocalChecked());
             FVector4* Obj = new FVector4(*Arg0);
             
             
@@ -103,8 +103,8 @@ static void* _FVector4New_(const v8::FunctionCallbackInfo<v8::Value>& Info)
             )
         {
             
-            FVector2D* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector2D>(Info[0]->ToObject(Context).ToLocalChecked());
-            FVector2D* Arg1 = puerts::DataTransfer::GetPoninterFast<FVector2D>(Info[1]->ToObject(Context).ToLocalChecked());
+            FVector2D* Arg0 = puerts::DataTransfer::GetPointerFast<FVector2D>(Info[0]->ToObject(Context).ToLocalChecked());
+            FVector2D* Arg1 = puerts::DataTransfer::GetPointerFast<FVector2D>(Info[1]->ToObject(Context).ToLocalChecked());
             FVector4* Obj = new FVector4(*Arg0, *Arg1);
             
             
@@ -130,6 +130,12 @@ static void* _FVector4New_(const v8::FunctionCallbackInfo<v8::Value>& Info)
     return nullptr;
 }
 
+static void _FVector4Delete_(void *Ptr)
+{
+    FVector4 *Self = static_cast<FVector4*>(Ptr);
+    // UE_LOG(LogTemp, Warning, TEXT("_FVector4Delete_:%p"), Self);
+    delete Self;
+}
 static void FVector4M_set_Item(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
@@ -142,7 +148,7 @@ static void FVector4M_set_Item(const v8::FunctionCallbackInfo<v8::Value>& Info)
         {
             
             int32 Arg0 = Info[0]->ToInteger(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_set_Item] Attempt to access a NULL self pointer");
@@ -168,7 +174,7 @@ static void FVector4M_get_Item(const v8::FunctionCallbackInfo<v8::Value>& Info)
         {
             
             int32 Arg0 = Info[0]->ToInteger(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_get_Item] Attempt to access a NULL self pointer");
@@ -194,7 +200,7 @@ static void FVector4M_op_UnaryNegation(const v8::FunctionCallbackInfo<v8::Value>
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_UnaryNegation] Attempt to access a NULL self pointer");
@@ -227,8 +233,8 @@ static void FVector4M_op_Addition(const v8::FunctionCallbackInfo<v8::Value>& Inf
             )
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_Addition] Attempt to access a NULL self pointer");
@@ -261,8 +267,8 @@ static void FVector4M_op_Subtraction(const v8::FunctionCallbackInfo<v8::Value>& 
             )
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_Subtraction] Attempt to access a NULL self pointer");
@@ -293,7 +299,7 @@ static void FVector4M_op_Multiply(const v8::FunctionCallbackInfo<v8::Value>& Inf
         {
             
             float Arg0 = Info[0]->ToNumber(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_Multiply] Attempt to access a NULL self pointer");
@@ -318,8 +324,8 @@ static void FVector4M_op_Multiply(const v8::FunctionCallbackInfo<v8::Value>& Inf
             )
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_Multiply] Attempt to access a NULL self pointer");
@@ -350,7 +356,7 @@ static void FVector4M_op_Division(const v8::FunctionCallbackInfo<v8::Value>& Inf
         {
             
             float Arg0 = Info[0]->ToNumber(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_Division] Attempt to access a NULL self pointer");
@@ -375,8 +381,8 @@ static void FVector4M_op_Division(const v8::FunctionCallbackInfo<v8::Value>& Inf
             )
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_Division] Attempt to access a NULL self pointer");
@@ -409,8 +415,8 @@ static void FVector4M_op_Equality(const v8::FunctionCallbackInfo<v8::Value>& Inf
             )
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_Equality] Attempt to access a NULL self pointer");
@@ -440,8 +446,8 @@ static void FVector4M_op_Inequality(const v8::FunctionCallbackInfo<v8::Value>& I
             )
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_Inequality] Attempt to access a NULL self pointer");
@@ -471,8 +477,8 @@ static void FVector4M_op_ExclusiveOr(const v8::FunctionCallbackInfo<v8::Value>& 
             )
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_op_ExclusiveOr] Attempt to access a NULL self pointer");
@@ -503,7 +509,7 @@ static void FVector4M_Component(const v8::FunctionCallbackInfo<v8::Value>& Info)
         {
             
             int32 Arg0 = Info[0]->ToInteger(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_Component] Attempt to access a NULL self pointer");
@@ -523,7 +529,7 @@ static void FVector4M_Component(const v8::FunctionCallbackInfo<v8::Value>& Info)
         {
             
             int32 Arg0 = Info[0]->ToInteger(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_Component] Attempt to access a NULL self pointer");
@@ -554,9 +560,9 @@ static void FVector4M_Equals(const v8::FunctionCallbackInfo<v8::Value>& Info)
             Info[1]->IsNumber())
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
             float Arg1 = Info[1]->ToNumber(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_Equals] Attempt to access a NULL self pointer");
@@ -584,7 +590,7 @@ static void FVector4M_IsUnit3(const v8::FunctionCallbackInfo<v8::Value>& Info)
         {
             
             float Arg0 = Info[0]->ToNumber(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_IsUnit3] Attempt to access a NULL self pointer");
@@ -610,7 +616,7 @@ static void FVector4M_ToString(const v8::FunctionCallbackInfo<v8::Value>& Info)
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_ToString] Attempt to access a NULL self pointer");
@@ -638,7 +644,7 @@ static void FVector4M_InitFromString(const v8::FunctionCallbackInfo<v8::Value>& 
         {
             
             const FString Arg0 = UTF8_TO_TCHAR(*(v8::String::Utf8Value(Isolate, Info[0])));
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_InitFromString] Attempt to access a NULL self pointer");
@@ -666,7 +672,7 @@ static void FVector4M_GetSafeNormal(const v8::FunctionCallbackInfo<v8::Value>& I
         {
             
             float Arg0 = Info[0]->ToNumber(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_GetSafeNormal] Attempt to access a NULL self pointer");
@@ -695,7 +701,7 @@ static void FVector4M_GetUnsafeNormal3(const v8::FunctionCallbackInfo<v8::Value>
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_GetUnsafeNormal3] Attempt to access a NULL self pointer");
@@ -724,7 +730,7 @@ static void FVector4M_ToOrientationRotator(const v8::FunctionCallbackInfo<v8::Va
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_ToOrientationRotator] Attempt to access a NULL self pointer");
@@ -753,7 +759,7 @@ static void FVector4M_ToOrientationQuat(const v8::FunctionCallbackInfo<v8::Value
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_ToOrientationQuat] Attempt to access a NULL self pointer");
@@ -782,7 +788,7 @@ static void FVector4M_Rotation(const v8::FunctionCallbackInfo<v8::Value>& Info)
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_Rotation] Attempt to access a NULL self pointer");
@@ -819,7 +825,7 @@ static void FVector4M_Set(const v8::FunctionCallbackInfo<v8::Value>& Info)
             float Arg1 = Info[1]->ToNumber(Context).ToLocalChecked()->Value();
             float Arg2 = Info[2]->ToNumber(Context).ToLocalChecked()->Value();
             float Arg3 = Info[3]->ToNumber(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_Set] Attempt to access a NULL self pointer");
@@ -843,7 +849,7 @@ static void FVector4M_Size3(const v8::FunctionCallbackInfo<v8::Value>& Info)
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_Size3] Attempt to access a NULL self pointer");
@@ -869,7 +875,7 @@ static void FVector4M_SizeSquared3(const v8::FunctionCallbackInfo<v8::Value>& In
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_SizeSquared3] Attempt to access a NULL self pointer");
@@ -895,7 +901,7 @@ static void FVector4M_Size(const v8::FunctionCallbackInfo<v8::Value>& Info)
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_Size] Attempt to access a NULL self pointer");
@@ -921,7 +927,7 @@ static void FVector4M_SizeSquared(const v8::FunctionCallbackInfo<v8::Value>& Inf
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_SizeSquared] Attempt to access a NULL self pointer");
@@ -947,7 +953,7 @@ static void FVector4M_ContainsNaN(const v8::FunctionCallbackInfo<v8::Value>& Inf
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_ContainsNaN] Attempt to access a NULL self pointer");
@@ -975,7 +981,7 @@ static void FVector4M_IsNearlyZero3(const v8::FunctionCallbackInfo<v8::Value>& I
         {
             
             float Arg0 = Info[0]->ToNumber(Context).ToLocalChecked()->Value();
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_IsNearlyZero3] Attempt to access a NULL self pointer");
@@ -1005,8 +1011,8 @@ static void FVector4M_Reflect3(const v8::FunctionCallbackInfo<v8::Value>& Info)
             )
         {
             
-            const FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            const FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(Info[0]->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_Reflect3] Attempt to access a NULL self pointer");
@@ -1043,9 +1049,9 @@ static void FVector4M_FindBestAxisVectors3(const v8::FunctionCallbackInfo<v8::Va
             )
         {
             
-            FVector4* Arg0 = puerts::DataTransfer::GetPoninterFast<FVector4>(puerts::DataTransfer::UnRef(Isolate, Info[0])->ToObject(Context).ToLocalChecked());
-            FVector4* Arg1 = puerts::DataTransfer::GetPoninterFast<FVector4>(puerts::DataTransfer::UnRef(Isolate, Info[1])->ToObject(Context).ToLocalChecked());
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            FVector4* Arg0 = puerts::DataTransfer::GetPointerFast<FVector4>(puerts::DataTransfer::UnRef(Isolate, Info[0])->ToObject(Context).ToLocalChecked());
+            FVector4* Arg1 = puerts::DataTransfer::GetPointerFast<FVector4>(puerts::DataTransfer::UnRef(Isolate, Info[1])->ToObject(Context).ToLocalChecked());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_FindBestAxisVectors3] Attempt to access a NULL self pointer");
@@ -1069,7 +1075,7 @@ static void FVector4M_DiagnosticCheckNaN(const v8::FunctionCallbackInfo<v8::Valu
         if (true)
         {
             
-            auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.Holder());
+            auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
             if (!Self)
             {
                 puerts::DataTransfer::ThrowException(Isolate, "[FVector4::M_DiagnosticCheckNaN] Attempt to access a NULL self pointer");
@@ -1083,87 +1089,127 @@ static void FVector4M_DiagnosticCheckNaN(const v8::FunctionCallbackInfo<v8::Valu
     puerts::DataTransfer::ThrowException(Isolate, "Invalid argument!");
 }
 
-static void _FVector4XGet_(v8::Local<v8::Name> Property, const v8::PropertyCallbackInfo<v8::Value>& Info)
+static void _FVector4XGet_(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.This());
+    auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
+    
+    if (!Self) {
+        puerts::DataTransfer::ThrowException(Isolate, "[FVector4::X] Attempt to access a NULL self pointer");
+        return;
+    }
 
     auto V8Result =v8::Number::New(Isolate, Self->X);
     Info.GetReturnValue().Set(V8Result);
 }
-static void _FVector4XSet_(v8::Local<v8::Name> Property, v8::Local<v8::Value> Value, const v8::PropertyCallbackInfo<void>& Info)
+static void _FVector4XSet_(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.This());
+    auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
+    if (!Self) {
+        puerts::DataTransfer::ThrowException(Isolate, "[FVector4::X] Attempt to access a NULL self pointer");
+        return;
+    }
+    auto Value = Info[0];
 
     Self->X =Value->ToNumber(Context).ToLocalChecked()->Value();
 }
-static void _FVector4YGet_(v8::Local<v8::Name> Property, const v8::PropertyCallbackInfo<v8::Value>& Info)
+static void _FVector4YGet_(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.This());
+    auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
+    
+    if (!Self) {
+        puerts::DataTransfer::ThrowException(Isolate, "[FVector4::Y] Attempt to access a NULL self pointer");
+        return;
+    }
 
     auto V8Result =v8::Number::New(Isolate, Self->Y);
     Info.GetReturnValue().Set(V8Result);
 }
-static void _FVector4YSet_(v8::Local<v8::Name> Property, v8::Local<v8::Value> Value, const v8::PropertyCallbackInfo<void>& Info)
+static void _FVector4YSet_(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.This());
+    auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
+    if (!Self) {
+        puerts::DataTransfer::ThrowException(Isolate, "[FVector4::Y] Attempt to access a NULL self pointer");
+        return;
+    }
+    auto Value = Info[0];
 
     Self->Y =Value->ToNumber(Context).ToLocalChecked()->Value();
 }
-static void _FVector4ZGet_(v8::Local<v8::Name> Property, const v8::PropertyCallbackInfo<v8::Value>& Info)
+static void _FVector4ZGet_(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.This());
+    auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
+    
+    if (!Self) {
+        puerts::DataTransfer::ThrowException(Isolate, "[FVector4::Z] Attempt to access a NULL self pointer");
+        return;
+    }
 
     auto V8Result =v8::Number::New(Isolate, Self->Z);
     Info.GetReturnValue().Set(V8Result);
 }
-static void _FVector4ZSet_(v8::Local<v8::Name> Property, v8::Local<v8::Value> Value, const v8::PropertyCallbackInfo<void>& Info)
+static void _FVector4ZSet_(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.This());
+    auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
+    if (!Self) {
+        puerts::DataTransfer::ThrowException(Isolate, "[FVector4::Z] Attempt to access a NULL self pointer");
+        return;
+    }
+    auto Value = Info[0];
 
     Self->Z =Value->ToNumber(Context).ToLocalChecked()->Value();
 }
-static void _FVector4WGet_(v8::Local<v8::Name> Property, const v8::PropertyCallbackInfo<v8::Value>& Info)
+static void _FVector4WGet_(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.This());
+    auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
+    
+    if (!Self) {
+        puerts::DataTransfer::ThrowException(Isolate, "[FVector4::W] Attempt to access a NULL self pointer");
+        return;
+    }
 
     auto V8Result =v8::Number::New(Isolate, Self->W);
     Info.GetReturnValue().Set(V8Result);
 }
-static void _FVector4WSet_(v8::Local<v8::Name> Property, v8::Local<v8::Value> Value, const v8::PropertyCallbackInfo<void>& Info)
+static void _FVector4WSet_(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    auto Self = puerts::DataTransfer::GetPoninterFast<FVector4>(Info.This());
+    auto Self = puerts::DataTransfer::GetPointerFast<FVector4>(Info.Holder());
+    if (!Self) {
+        puerts::DataTransfer::ThrowException(Isolate, "[FVector4::W] Attempt to access a NULL self pointer");
+        return;
+    }
+    auto Value = Info[0];
 
     Self->W =Value->ToNumber(Context).ToLocalChecked()->Value();
 }
@@ -1220,14 +1266,15 @@ struct AutoRegisterForFVector4
             {0, 0}
         };
 
-        Def.UStructName = "FVector4";
+        Def.UETypeName = "FVector4";
 
         Def.Initialize = _FVector4New_;
-        Def.Propertys = Properties;
+        Def.Finalize = _FVector4Delete_;
+        Def.Properties = Properties;
         Def.Methods = Methods;
         Def.Functions = Functions;
 
-        puerts::RegisterClass(Def);
+        puerts::RegisterJSClass(Def);
         
     }
 };

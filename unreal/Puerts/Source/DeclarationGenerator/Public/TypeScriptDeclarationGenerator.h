@@ -11,6 +11,7 @@
 #include "CoreUObject.h"
 #include <map>
 #include <vector>
+
 #include "PropertyMacros.h"
 
 struct DECLARATIONGENERATOR_API FStringBuffer
@@ -37,6 +38,24 @@ struct DECLARATIONGENERATOR_API FTypeScriptDeclarationGenerator
     TSet<UObject*> Processed;
     TSet<FString> ProcessedByName;
     std::map<UStruct*, std::vector<UFunction*>> ExtensionMethodsMap;
+    struct FunctionKey
+    {
+        FunctionKey(const FString& InFunctioName, bool InIsStatic)
+            : FunctionName(InFunctioName)
+            , IsStatic(InIsStatic)
+        {}
+
+        bool operator < (const FunctionKey& other) const
+        {
+            return IsStatic != other.IsStatic ? IsStatic < other.IsStatic : FunctionName < other.FunctionName;
+        }
+        
+        FString FunctionName;
+        bool IsStatic;
+    };
+    typedef TArray<FString> FunctionOverloads;
+    typedef std::map<FunctionKey, FunctionOverloads> FunctionOutputs;
+    std::map<UStruct*, FunctionOutputs> AllFuncionOutputs;
 
     void InitExtensionMethodsMap();
 
@@ -49,7 +68,17 @@ struct DECLARATIONGENERATOR_API FTypeScriptDeclarationGenerator
     virtual bool GenTypeDecl(FStringBuffer& StringBuffer, PropertyMacro* Property, TArray<UObject *> &AddToGen, bool ArrayDimProcessed = false, bool TreatAsRawFunction = false);
     
     virtual bool GenFunction(FStringBuffer& OwnerBuffer,UFunction* Function, bool WithName = true, bool ForceOneway = false, bool IgnoreOut = false, bool IsExtensionMethod = false);
-    
+
+    void GatherExtensions(UStruct *Struct, FStringBuffer& Buff);
+
+    void GenResolvedFunctions(UStruct *Struct, FStringBuffer& Buff);
+
+    FunctionOutputs& GetFunctionOutputs(UStruct *Struct);
+
+    FunctionOverloads& GetFunctionOverloads(FunctionOutputs& Outputs, const FString& FunctionName, bool IsStatic);
+
+    void TryToAddOverload(FunctionOutputs& Outputs, const FString& FunctionName, bool IsStatic, const FString& Overload);
+
     virtual void GenClass(UClass* Class);
     
     virtual void GenEnum(UEnum *Enum);
@@ -62,22 +91,3 @@ struct DECLARATIONGENERATOR_API FTypeScriptDeclarationGenerator
 
     virtual ~FTypeScriptDeclarationGenerator(){}
 };
-
-struct DECLARATIONGENERATOR_API FReactDeclarationGenerator : public FTypeScriptDeclarationGenerator
-{
-    void Begin(FString Namespace) override;
-
-    void GenReactDeclaration();
-
-    void GenClass(UClass* Class) override;
-
-    void GenStruct(UStruct *Struct) override;
-
-    void GenEnum(UEnum *Enum) override;
-
-    void End() override;
-
-    virtual ~FReactDeclarationGenerator() {}
-};
-
-

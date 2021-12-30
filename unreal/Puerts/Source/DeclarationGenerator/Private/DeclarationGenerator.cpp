@@ -1,4 +1,4 @@
-/*
+﻿/*
 * Tencent is pleased to support the open source community by making Puerts available.
 * Copyright (C) 2020 THL A29 Limited, a Tencent company.  All rights reserved.
 * Puerts is licensed under the BSD 3-Clause License, except for the third-party components listed in the file 'LICENSE' which may be subject to their corresponding license terms.
@@ -8,6 +8,7 @@
 #include "Runtime/Launch/Resources/Version.h"
 #include "IDeclarationGenerator.h"
 #include "Features/IModularFeatures.h"
+#include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "CoreUObject.h"
 #include "TypeScriptDeclarationGenerator.h"
@@ -24,7 +25,12 @@
 //#include "Misc/MessageDialog.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Engine/UserDefinedStruct.h"
+#include "Engine/UserDefinedEnum.h"
+#include "Engine/Blueprint.h"
 #include "TypeScriptObject.h"
+#include "CodeGenerator.h"
+#include "JSClassRegister.h"
+#include "Engine/CollisionProfile.h"
 
 #define STRINGIZE(x) #x
 #define STRINGIZE_VALUE_OF(x) STRINGIZE(x)
@@ -46,27 +52,48 @@ static FString SafeName(const FString &Name)
     return Ret;
 }
 
-//在PropertyTranslator.cpp另有一份，因为属于两个不同的模块共享比较困难，改动需要同步改
-static FString DisplayNameOfUserDefinedStructField(const FString &Name)
+static FString SafeFieldName(const FString &Name, bool WithBracket = true)
 {
-    const int32 GuidStrLen = 32;
-    if (Name.Len() > GuidStrLen + 3)
+    bool IsInvalid = false;
+    FString Ret = TEXT("");
+
+    for (int i = 0; i < Name.Len(); i++)
     {
-        const int32 UnderscoreIndex = Name.Len() - GuidStrLen - 1;
-        if (TCHAR('_') == Name[UnderscoreIndex])
+        auto Char = Name[i];
+        if ((Char >= (TCHAR)'0' && Char <= (TCHAR)'9')
+            || (Char >= (TCHAR)'a' && Char <= (TCHAR)'z')
+            || (Char >= (TCHAR)'A' && Char <= (TCHAR)'Z')
+            || Char == (TCHAR)'_')
         {
-            for (int i = UnderscoreIndex - 1; i > 0; i--)
+            Ret += Char;
+        }
+        else
+        {
+            IsInvalid = true;
+            if (Char == (TCHAR)'"')
             {
-                if (TCHAR('_') == Name[i])
-                {
-                    return Name.Mid(0, i);
-                }
+                Ret += "\\\"";
+            }
+            else if (Char == (TCHAR)'\\')
+            {
+                Ret += "\\\\";
+            }
+            else
+            {
+                Ret += Char;
             }
         }
     }
-    return Name;
+    if (Ret.Len() > 0)
+    {
+        auto FirstChar = Ret[0];
+        if ((TCHAR)'0' <= FirstChar && FirstChar <= (TCHAR)'9')
+        {
+            IsInvalid = true;
+        }
+    }
+    return IsInvalid  ? (WithBracket ? ((TEXT("[\"") + Ret + TEXT("\"]"))) : ((TEXT("\"") + Ret + TEXT("\"")))) : Ret;
 }
-
 
 FStringBuffer& FStringBuffer::operator <<(const FString& InText)
 {
@@ -112,13 +139,30 @@ void FStringBuffer::Indent(int Num)
     }
 }
 
+TArray<UClass*> GetSortedClasses()
+{
+    TArray<UClass*> SortedClasses;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        SortedClasses.Add(*It);
+    }
+
+    SortedClasses.Sort([&](const UClass &ClassA, const UClass &ClassB) -> bool {
+        return ClassA.GetName() < ClassB.GetName();
+    });
+    
+    return SortedClasses;
+}
+
 
 void FTypeScriptDeclarationGenerator::Begin(FString ModuleName)
 {
+    AllFuncionOutputs.clear();
     InitExtensionMethodsMap();
     Output = {"", ""};
     Output << "/// <reference path=\"puerts.d.ts\" />\n";
     Output << "declare module \"" << ModuleName << "\" {\n";
+    Output << "    import {$Ref, $Nullable} from \"puerts\"\n\n";
     Output.Indent(4);
 }
 
@@ -129,11 +173,60 @@ bool IsChildOf(UClass *Class, const FString& Name)
     return IsChildOf(Class->GetSuperClass(), Name);
 }
 
+const FString GetNamePrefix(const puerts::CTypeInfo* TypeInfo)
+{
+    return TypeInfo->IsObjectType() ? "cpp." : "";    
+}
+
+const FString GetName(const puerts::CTypeInfo* TypeInfo)
+{
+    FString Ret = UTF8_TO_TCHAR(TypeInfo->Name());
+    if (TypeInfo->IsUEType())
+    {
+        return Ret.Mid(1);
+    }
+    return Ret;
+}
+
+void GenArgumentsForFunctionInfo(const puerts::CFunctionInfo* Type, FStringBuffer & Buff)
+{
+    for(unsigned int i = 0; i < Type->ArgumentCount(); i++)
+    {
+        if (i != 0) Buff << ", ";
+        auto argInfo = Type->Argument(i);
+            
+        Buff << FString::Printf(TEXT("p%d"), i) << ": ";
+            
+        bool IsReference = argInfo->IsRef();
+        bool IsNullable = !IsReference && argInfo->IsPointer();
+        if (IsNullable)
+        {
+            Buff << "$Nullable<";
+        }
+        if (IsReference)
+        {
+            Buff << "$Ref<";
+        }
+            
+        Buff << GetNamePrefix(argInfo) << GetName(argInfo);
+            
+        if (IsNullable)
+        {
+            Buff << ">";
+        }
+        if (IsReference)
+        {
+            Buff << ">";
+        }
+    }
+}
+
 void FTypeScriptDeclarationGenerator::InitExtensionMethodsMap()
 {
-    for (TObjectIterator<UClass> It; It; ++It)
+    TArray<UClass*> SortedClasses(GetSortedClasses());
+    for (int i = 0; i < SortedClasses.Num(); ++i)
     {
-        UClass* Class = *It;
+        UClass* Class = SortedClasses[i];
         bool IsExtensionMethod = IsChildOf(Class, "ExtensionMethods");
         if (IsExtensionMethod)
         {
@@ -173,14 +266,27 @@ void FTypeScriptDeclarationGenerator::InitExtensionMethodsMap()
 void FTypeScriptDeclarationGenerator::GenTypeScriptDeclaration()
 {
     Begin();
-    for (TObjectIterator<UClass> It; It; ++It)
+
+    Output << "    import * as cpp from \"cpp\"\n\n";
+    
+    TArray<UClass*> SortedClasses(GetSortedClasses());
+    for (int i = 0; i < SortedClasses.Num(); ++i)
     {
-        UClass* Class = *It;
+        UClass* Class = SortedClasses[i];
+        checkfSlow(Class != nullptr, TEXT("Class name corruption!"));
+        if (Class->GetName().StartsWith("SKEL_")        ||
+            Class->GetName().StartsWith("REINST_")      ||
+            Class->GetName().StartsWith("TRASHCLASS_")  ||
+            Class->GetName().StartsWith("PLACEHOLDER-") ||
+            Class->GetName().StartsWith("HOTRELOADED_"))
+        {
+            continue;
+        }
         Gen(Class);
     }
     End();
 
-    FFileHelper::SaveStringToFile(ToString(), *(FPaths::ProjectContentDir() / TEXT("Typing/ue/ue.d.ts")));
+    FFileHelper::SaveStringToFile(ToString(), *(IPluginManager::Get().FindPlugin("Puerts")->GetBaseDir() / TEXT("Typing/ue/ue.d.ts")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 }
 
 void FTypeScriptDeclarationGenerator::Gen(UObject *ToGen)
@@ -208,30 +314,6 @@ void FTypeScriptDeclarationGenerator::Gen(UObject *ToGen)
     }
 }
 
-bool IsDelegate(PropertyMacro* InProperty)
-{
-    return InProperty->IsA<DelegatePropertyMacro>()
-        || InProperty->IsA<MulticastDelegatePropertyMacro>()
-#if ENGINE_MINOR_VERSION >= 23
-        || InProperty->IsA<MulticastInlineDelegatePropertyMacro>()
-        || InProperty->IsA<MulticastSparseDelegatePropertyMacro>()
-#endif
-        ;
-}
-
-bool HasObjectParam(UFunction* InFunction)
-{
-    for (TFieldIterator<PropertyMacro> ParamIt(InFunction); ParamIt; ++ParamIt)
-    {
-        auto Property = *ParamIt;
-        if (Property->IsA<ObjectPropertyBaseMacro>())
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 // #lizard forgives
 bool FTypeScriptDeclarationGenerator::GenTypeDecl(FStringBuffer& StringBuffer, PropertyMacro* Property, TArray<UObject *> &AddToGen, bool ArrayDimProcessed, bool TreatAsRawFunction)
 {
@@ -251,8 +333,7 @@ bool FTypeScriptDeclarationGenerator::GenTypeDecl(FStringBuffer& StringBuffer, P
     {
         StringBuffer << "boolean";
     }
-    else if (Property->IsA<BytePropertyMacro>()
-             || Property->IsA<DoublePropertyMacro>()
+    else if (Property->IsA<DoublePropertyMacro>()
              || Property->IsA<FloatPropertyMacro>()
              || Property->IsA<IntPropertyMacro>()
              || Property->IsA<UInt32PropertyMacro>()
@@ -279,13 +360,32 @@ bool FTypeScriptDeclarationGenerator::GenTypeDecl(FStringBuffer& StringBuffer, P
         AddToGen.Add(EnumProperty->GetEnum());
         StringBuffer << SafeName(EnumProperty->GetEnum()->GetName());
     }
+    else if (BytePropertyMacro* ByteProperty = CastFieldMacro<BytePropertyMacro>(Property))
+    {
+        if(ByteProperty->GetIntPropertyEnum())
+        {
+            AddToGen.Add(ByteProperty->GetIntPropertyEnum());
+            StringBuffer << SafeName(ByteProperty->GetIntPropertyEnum()->GetName());
+        }
+        else
+        {
+            StringBuffer << "number";
+        }
+    }
     else if (auto StructProperty = CastFieldMacro<StructPropertyMacro>(Property))
     {
-        if (StructProperty->Struct->GetName() != "ArrayBuffer")
+        if (StructProperty->Struct->GetName() != TEXT("ArrayBuffer") && StructProperty->Struct->GetName() != TEXT("JsObject"))
         {
             AddToGen.Add(StructProperty->Struct);
         }
-        StringBuffer << SafeName(StructProperty->Struct->GetName());
+        if (StructProperty->Struct->GetName() == TEXT("JsObject"))
+        {
+            StringBuffer << "object";
+        }
+        else
+        {
+            StringBuffer << SafeName(StructProperty->Struct->GetName());
+        }
     }
     else if (auto ArrayProperty = CastFieldMacro<ArrayPropertyMacro>(Property))
     {
@@ -345,6 +445,11 @@ bool FTypeScriptDeclarationGenerator::GenTypeDecl(FStringBuffer& StringBuffer, P
         AddToGen.Add(WeakObjectProperty->PropertyClass);
         StringBuffer << "TWeakObjectPtr<" << SafeName(WeakObjectProperty->PropertyClass->GetName()) << ">";
     }
+    else if (auto SoftClassProperty = CastFieldMacro<SoftClassPropertyMacro>(Property))
+    {
+        AddToGen.Add(SoftClassProperty->PropertyClass);
+        StringBuffer <<"TSoftClassPtr<" << SafeName(SoftClassProperty->MetaClass->GetName()) << ">";
+    }
     else if (auto SoftObjectProperty = CastFieldMacro<SoftObjectPropertyMacro>(Property))
     {
         AddToGen.Add(SoftObjectProperty->PropertyClass);
@@ -373,7 +478,7 @@ bool FTypeScriptDeclarationGenerator::GenFunction(FStringBuffer& OwnerBuffer,UFu
             OwnerBuffer << "static ";
         }
         
-        OwnerBuffer << SafeName(Function->GetName());
+        OwnerBuffer << SafeFieldName(Function->GetName());
     }
     OwnerBuffer << "(";
     PropertyMacro *ReturnValue = nullptr;
@@ -398,8 +503,29 @@ bool FTypeScriptDeclarationGenerator::GenFunction(FStringBuffer& OwnerBuffer,UFu
             else
             {
                 FStringBuffer TmpBuf;
-                TmpBuf << SafeName(Property->GetName()) << ": ";
-                if (!IgnoreOut && Property->PropertyFlags & CPF_OutParm && (!(Property->PropertyFlags & CPF_ConstParm)))
+                TMap<FName, FString> *MetaMap = UMetaData::GetMapForObject(Function);
+                const FName MetadataCppDefaultValueKey(*(FString(TEXT("CPP_Default_")) + Property->GetName()));
+                FString *DefaultValuePtr = nullptr;
+                if (MetaMap)
+                {
+                    DefaultValuePtr = MetaMap->Find(MetadataCppDefaultValueKey);
+                }
+
+                TmpBuf << SafeName(Property->GetName());
+                if (DefaultValuePtr)
+                {
+                    TmpBuf << "?";
+                }
+                TmpBuf << ": ";
+
+                const bool IsReference = !IgnoreOut && Property->PropertyFlags & CPF_OutParm && (!(Property->PropertyFlags & CPF_ConstParm));
+                const bool IsNullable = !(DefaultValuePtr != nullptr || IsReference) && (CastFieldMacro<ObjectPropertyMacro>(Property) != nullptr) && !(Property->PropertyFlags & CPF_ReferenceParm);
+                
+                if (IsNullable)
+                {
+                    TmpBuf << "$Nullable<";
+                }
+                if (IsReference)
                 {
                     if (ForceOneway) return false;
                     TmpBuf << "$Ref<";
@@ -408,16 +534,34 @@ bool FTypeScriptDeclarationGenerator::GenFunction(FStringBuffer& OwnerBuffer,UFu
                 {
                     return false;
                 }
-                if (!IgnoreOut && Property->PropertyFlags & CPF_OutParm && (!(Property->PropertyFlags & CPF_ConstParm)))
+                if (IsReference)
                 {
                     TmpBuf << ">";
+                }
+                if (IsNullable)
+                {
+                    TmpBuf << ">";
+                }
+                
+                if (DefaultValuePtr)
+                {
+                    if (Property->IsA<StrPropertyMacro>()
+                        || Property->IsA<NamePropertyMacro>()
+                        || Property->IsA<TextPropertyMacro>())
+                    {
+                        TmpBuf << " /* = \"" << *DefaultValuePtr << "\" */";
+                    }
+                    else
+                    {
+                        TmpBuf << " /* = " << *DefaultValuePtr << " */";
+                    }
                 }
                 ParamDecls.Add(TmpBuf.Buffer);
             }
         }
     }
     OwnerBuffer << FString::Join(ParamDecls, TEXT(", "));
-    OwnerBuffer << ")" << (WithName ? ": " : " => ");
+    OwnerBuffer << ")" << (WithName ? " : " : " => ");
     if (!GenTypeDecl(OwnerBuffer, ReturnValue, RefTypes))
     {
         return false;
@@ -430,6 +574,118 @@ bool FTypeScriptDeclarationGenerator::GenFunction(FStringBuffer& OwnerBuffer,UFu
     
     //OwnerBuffer << "    " << LocalBuffer.Buffer << ";\n";
     return true;
+}
+
+static bool GenTemplateBindingFunction(FStringBuffer& OwnerBuffer, puerts::NamedFunctionInfo* Func, bool IsStatic)
+{
+    if (IsStatic)
+    {
+        OwnerBuffer << "static ";
+    }
+    OwnerBuffer << Func->Name << "(";
+    GenArgumentsForFunctionInfo(Func->Type, OwnerBuffer);
+    const auto Return = Func->Type->Return();
+    OwnerBuffer << ") : " << GetNamePrefix(Return) << GetName(Return);
+    
+    return true;
+}
+
+FTypeScriptDeclarationGenerator::FunctionOutputs& FTypeScriptDeclarationGenerator::GetFunctionOutputs(UStruct *Struct)
+{
+    return AllFuncionOutputs[Struct];
+}
+
+FTypeScriptDeclarationGenerator::FunctionOverloads& FTypeScriptDeclarationGenerator::GetFunctionOverloads(FunctionOutputs& Outputs, const FString& FunctionName, bool IsStatic)
+{
+    return Outputs[FunctionKey(FunctionName, IsStatic)];
+}
+
+void FTypeScriptDeclarationGenerator::TryToAddOverload(FunctionOutputs& Outputs, const FString& FunctionName, bool IsStatic, const FString& Overload)
+{
+	FunctionOverloads& Overloads = GetFunctionOverloads(Outputs, FunctionName, IsStatic);
+	if (!Overloads.Contains(Overload))
+	{
+		Overloads.Add(Overload);
+	}
+}
+
+void FTypeScriptDeclarationGenerator::GatherExtensions(UStruct *Struct, FStringBuffer& Buff)
+{
+    FunctionOutputs& Outputs = GetFunctionOutputs(Struct);
+    auto ClassDefinition = puerts::FindClassByType(Struct);
+    if (ClassDefinition)
+    {
+        puerts::NamedFunctionInfo* FunctionInfo = ClassDefinition->FunctionInfos;
+        while (FunctionInfo && FunctionInfo->Name && FunctionInfo->Type)
+        {
+            FStringBuffer Tmp;
+            GenTemplateBindingFunction(Tmp, FunctionInfo, true);
+            TryToAddOverload(Outputs, FunctionInfo->Name, true, Tmp.Buffer);
+            ++FunctionInfo;
+        }
+
+        puerts::NamedFunctionInfo* MethodInfo = ClassDefinition->MethodInfos;
+        while (MethodInfo && MethodInfo->Name && MethodInfo->Type)
+        {
+            FStringBuffer Tmp;
+            GenTemplateBindingFunction(Tmp, MethodInfo, false);
+            TryToAddOverload(Outputs, MethodInfo->Name, false, Tmp.Buffer);
+            ++MethodInfo;
+        }
+    }
+
+    auto ExtensionMethodsIter = ExtensionMethodsMap.find(Struct);
+    if (ExtensionMethodsIter != ExtensionMethodsMap.end())
+    {
+        for (auto Iter = ExtensionMethodsIter->second.begin(); Iter != ExtensionMethodsIter->second.end(); ++Iter)
+        {
+            UFunction* Function = *Iter;
+
+            FStringBuffer Tmp;
+            if (!GenFunction(Tmp, Function, true, false, false, true))
+            {
+                continue;
+            }
+            TryToAddOverload(Outputs, Function->GetName(), false, Tmp.Buffer);
+        }
+    }
+}
+
+void FTypeScriptDeclarationGenerator::GenResolvedFunctions(UStruct *Struct, FStringBuffer& Buff)
+{
+    FunctionOutputs& Outputs = GetFunctionOutputs(Struct);
+
+	for(FunctionOutputs::iterator Iter = Outputs.begin(); Iter != Outputs.end(); ++Iter)
+	{
+        const FunctionKey& FunctionKey = Iter->first;
+        FunctionOverloads& Overloads = Outputs[FunctionKey];
+        for(FunctionOverloads::RangedForIteratorType OverloadIter = Overloads.begin(); OverloadIter != Overloads.end(); ++OverloadIter)
+        {
+        	Buff << "    " << *OverloadIter << ";\n";
+        }
+
+        UStruct* SuperStruct = Struct->GetSuperStruct();
+        while(SuperStruct != nullptr)
+        {
+            FunctionOutputs& SuperOutputs = GetFunctionOutputs(SuperStruct);
+            FunctionOutputs::iterator SuperOutputsIter = SuperOutputs.find(FunctionKey);
+            if (SuperOutputsIter != SuperOutputs.end())
+            {
+                FunctionOverloads& SuperOverloads = SuperOutputsIter->second;
+                for(FunctionOverloads::RangedForIteratorType SuperOverloadIter = SuperOverloads.begin(); SuperOverloadIter != SuperOverloads.end(); ++SuperOverloadIter)
+                {
+                    if (!Overloads.Contains(*SuperOverloadIter))
+                    {
+                        Buff << "    /**\n";
+                        Buff << "     * @deprecated Unsupported super overloads.\n";
+                        Buff << "     */\n";
+                        Buff << "    " << *SuperOverloadIter << ";\n";
+                    }
+                }
+            }
+            SuperStruct = SuperStruct->GetSuperStruct();
+        }
+    }
 }
 
 void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
@@ -455,7 +711,7 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
         auto Property = *PropertyIt;
 
         FStringBuffer TmpBuff;
-        TmpBuff << SafeName(Property->GetName()) << ": ";
+        TmpBuff << SafeFieldName(Property->GetName()) << ": ";
         TArray<UObject *> RefTypesTmp;
         if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp))
         {
@@ -465,9 +721,10 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
         {
             Gen(Type);
         }
-        StringBuffer << "    " << TmpBuff.Buffer << ";\n";
+        StringBuffer << "    " << TmpBuff << ";\n";
     }
-    
+
+    FunctionOutputs& Outputs = GetFunctionOutputs(Class);
     for (TFieldIterator<UFunction> FunctionIt(Class, EFieldIteratorFlags::ExcludeSuper); FunctionIt; ++FunctionIt)
     {
         FStringBuffer TmpBuff;
@@ -475,24 +732,12 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
         {
             continue;
         }
-        StringBuffer << "    " << TmpBuff.Buffer << ";\n";
+        TryToAddOverload(Outputs, FunctionIt->GetName(), (FunctionIt->FunctionFlags & FUNC_Static) != 0, TmpBuff.Buffer);
     }
 
-    auto ExtensionMethodsIter = ExtensionMethodsMap.find(Class);
-    if (ExtensionMethodsIter != ExtensionMethodsMap.end())
-    {
-        for (auto Iter = ExtensionMethodsIter->second.begin(); Iter != ExtensionMethodsIter->second.end(); ++Iter)
-        {
-            UFunction* Function = *Iter;
+    GatherExtensions(Class, StringBuffer);
 
-            FStringBuffer TmpBuff;
-            if (!GenFunction(TmpBuff, Function, true, false, false, true))
-            {
-                continue;
-            }
-            StringBuffer << "    " << TmpBuff.Buffer << ";\n";
-        }
-    }
+    GenResolvedFunctions(Class, StringBuffer);
     
     StringBuffer << "    static StaticClass(): Class;\n";
     StringBuffer << "    static Find(OrigInName: string, Outer?: Object): " << SafeName(Class->GetName()) << ";\n";
@@ -510,12 +755,59 @@ void FTypeScriptDeclarationGenerator::GenEnum(UEnum *Enum)
     TArray<FString> EnumListerrals;
     for (int i = 0; i < Enum->NumEnums(); ++i)
     {
-        auto Name = Enum->GetNameStringByIndex(i);
+        auto Name = Enum->IsA<UUserDefinedEnum>() ? 
+#if ENGINE_MINOR_VERSION >= 23 || ENGINE_MAJOR_VERSION > 4
+            Enum->GetAuthoredNameStringByIndex(i)
+#else
+            Enum->GetDisplayNameTextByIndex(i).ToString()
+#endif
+            : Enum->GetNameStringByIndex(i);
        // auto Value = Enum->GetValueByIndex(i);
-        EnumListerrals.Add(Name);
+        EnumListerrals.Add(SafeFieldName(Name, false));
+    }
+
+    StringBuffer << "enum " << SafeName(Enum->GetName()) << " { " << FString::Join(EnumListerrals, TEXT(", ")) ;
+
+    if (Enum == StaticEnum<EObjectTypeQuery>())
+    {
+        UCollisionProfile *CollisionProfile = UCollisionProfile::Get();
+        int32 ContainerIndex = 0;
+        while (true)
+        {
+            FName ChannelName = CollisionProfile->ReturnChannelNameFromContainerIndex(ContainerIndex);
+            if (ChannelName == NAME_None)
+            {
+                break;
+            }
+            auto ObjectType = CollisionProfile->ConvertToObjectType((ECollisionChannel)ContainerIndex);
+            if (ObjectType != EObjectTypeQuery::ObjectTypeQuery_MAX)
+            {
+                StringBuffer << FString::Printf(TEXT(", %s = %d"), *SafeName(ChannelName.ToString()), ObjectType);
+            }
+            ContainerIndex++;
+        }
+    }
+    else if (Enum == StaticEnum<ETraceTypeQuery>())
+    {
+        UCollisionProfile *CollisionProfile = UCollisionProfile::Get();
+        int32 ContainerIndex = 0;
+        while (true)
+        {
+            FName ChannelName = CollisionProfile->ReturnChannelNameFromContainerIndex(ContainerIndex);
+            if (ChannelName == NAME_None)
+            {
+                break;
+            }
+            auto TraceType = CollisionProfile->ConvertToTraceType((ECollisionChannel)ContainerIndex);
+            if (TraceType != ETraceTypeQuery::TraceTypeQuery_MAX)
+            {
+                StringBuffer << FString::Printf(TEXT(", %s = %d"), *SafeName(ChannelName.ToString()), TraceType);
+            }
+            ContainerIndex++;
+        }
     }
     
-    StringBuffer << "enum " << SafeName(Enum->GetName()) << " { " << FString::Join(EnumListerrals, TEXT(", ")) << "}\n";
+    StringBuffer << "}\n";
     
     Output << StringBuffer;
 }
@@ -541,6 +833,7 @@ void FTypeScriptDeclarationGenerator::GenStruct(UStruct *Struct)
         FStringBuffer TmpBuff;
         TmpBuff << "constructor(";
         bool First = true;
+        bool HasProperty = false;
         for (TFieldIterator<PropertyMacro> PropertyIt(Struct, EFieldIteratorFlags::ExcludeSuper); PropertyIt; ++PropertyIt)
         {
             auto Property = *PropertyIt;
@@ -552,14 +845,22 @@ void FTypeScriptDeclarationGenerator::GenStruct(UStruct *Struct)
             {
                 TmpBuff << ", ";
             }
-            TmpBuff << SafeName(Property->GetName()) << ": ";
+            TmpBuff << SafeName(Struct->IsA<UUserDefinedStruct>() ? 
+#if ENGINE_MINOR_VERSION >= 23 || ENGINE_MAJOR_VERSION > 4
+                Property->GetAuthoredName() 
+#else
+                Property->GetDisplayNameText().ToString()
+#endif
+                : Property->GetName()) << ": ";
             TArray<UObject *> RefTypesTmp;
             if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp))
             {
                 return;
             }
+            HasProperty = true;
         }
         TmpBuff << ")";
+        if (HasProperty) StringBuffer << "    constructor();\n";
         StringBuffer << "    " << TmpBuff.Buffer << ";\n";
     };
     GenConstrutor();
@@ -568,8 +869,14 @@ void FTypeScriptDeclarationGenerator::GenStruct(UStruct *Struct)
     {
         auto Property = *PropertyIt;
         FStringBuffer TmpBuff;
-        FString SN = SafeName(Property->GetName());
-        TmpBuff << (Struct->IsA<UUserDefinedStruct>() ? DisplayNameOfUserDefinedStructField(SN) : SN) << ": ";
+        FString SN = SafeFieldName(Struct->IsA<UUserDefinedStruct>() ? 
+#if ENGINE_MINOR_VERSION >= 23 || ENGINE_MAJOR_VERSION > 4
+            Property->GetAuthoredName() 
+#else
+            Property->GetDisplayNameText().ToString()
+#endif
+            : Property->GetName());
+        TmpBuff << SN << ": ";
         TArray<UObject *> RefTypesTmp;
         if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp))
         {
@@ -582,21 +889,9 @@ void FTypeScriptDeclarationGenerator::GenStruct(UStruct *Struct)
         StringBuffer << "    " << TmpBuff.Buffer << ";\n";
     }
 
-    auto ExtensionMethodsIter = ExtensionMethodsMap.find(Struct);
-    if (ExtensionMethodsIter != ExtensionMethodsMap.end())
-    {
-        for (auto Iter = ExtensionMethodsIter->second.begin(); Iter != ExtensionMethodsIter->second.end(); ++Iter)
-        {
-            UFunction* Function = *Iter;
-
-            FStringBuffer TmpBuff;
-            if (!GenFunction(TmpBuff, Function, true, false, false, true))
-            {
-                continue;
-            }
-            StringBuffer << "    " << TmpBuff.Buffer << ";\n";
-        }
-    }
+    GatherExtensions(Struct, StringBuffer);
+    
+    GenResolvedFunctions(Struct, StringBuffer);
 
     StringBuffer << "    static StaticClass(): Class;\n";
     
@@ -616,203 +911,6 @@ FString FTypeScriptDeclarationGenerator::ToString()
     return Output.Buffer;
 }
 
-//--- FSlotDeclarationGenerator begin ---
-void FReactDeclarationGenerator::Begin(FString Namespace) { } //do nothing
-
-void FReactDeclarationGenerator::End() { } //do nothing
-
-void FReactDeclarationGenerator::GenReactDeclaration()
-{
-    FString Components = TEXT("exports.lazyloadComponents = {};\n");
-    Output << "import * as React from 'react';\nimport {TArray}  from 'ue';\n\n";
-    
-    for (TObjectIterator<UClass> It; It; ++It)
-    {
-        UClass* Class = *It;
-        if (Class->IsChildOf<UPanelSlot>()) Gen(Class);
-    }
-
-    Output << "export interface Props {\n";
-    Output << "    Slot ? : PanelSlot;\n";
-    Output << "}\n\n";
-
-    for (TObjectIterator<UClass> It; It; ++It)
-    {
-        UClass* Class = *It;
-        if (Class->IsChildOf<UWidget>()) 
-        {
-            Gen(Class);
-            Components += "exports." + SafeName(Class->GetName()) + " = '" + SafeName(Class->GetName()) + "';\n";
-            if (!(Class->ClassFlags & CLASS_Native))
-            {
-                Components += "exports.lazyloadComponents." + SafeName(Class->GetName()) + " = '" + Class->GetPathName() + "';\n";
-            }
-        }
-    }
-
-    Output << R"(
-interface Root {
-    removeFromViewport() : void;
-    getWidget(): any;
-}
-
-interface TReactUMG {
-    render(element: React.ReactElement) : Root;
-    init(world: any) : void;
-}
-
-export var ReactUMG : TReactUMG;
-)";
-
-    FFileHelper::SaveStringToFile(ToString(), *(FPaths::ProjectContentDir() / TEXT("ReactTyping/react-umg/index.d.ts")));
-    FFileHelper::SaveStringToFile(Components, *(FPaths::ProjectContentDir() / TEXT("JavaScript/react-umg/components.js")));
-}
-
-static bool IsReactSupportProperty(PropertyMacro *Property) 
-{
-    if (CastFieldMacro<ObjectPropertyMacro>(Property)
-        || CastFieldMacro<ClassPropertyMacro>(Property)
-        || CastFieldMacro<WeakObjectPropertyMacro>(Property)
-        || CastFieldMacro<SoftObjectPropertyMacro>(Property)
-        || CastFieldMacro<LazyObjectPropertyMacro>(Property)) return false;
-    if (auto ArrayProperty = CastFieldMacro<ArrayPropertyMacro>(Property))
-    {
-        return IsReactSupportProperty(ArrayProperty->Inner);
-    }
-    else if (auto DelegateProperty = CastFieldMacro<DelegatePropertyMacro>(Property))
-    {
-        return !HasObjectParam(DelegateProperty->SignatureFunction);
-    }
-    else if (auto MulticastDelegateProperty = CastFieldMacro<MulticastDelegatePropertyMacro>(Property))
-    {
-        return !HasObjectParam(MulticastDelegateProperty->SignatureFunction);
-    }
-    return true;
-}
-
-void FReactDeclarationGenerator::GenClass(UClass* Class)
-{
-    if (Class->ImplementsInterface(UTypeScriptObject::StaticClass())) return;
-    if (!Class->IsChildOf<UPanelSlot>() && !Class->IsChildOf<UWidget>()) return;
-    bool IsWidget = Class->IsChildOf<UWidget>();
-    FStringBuffer StringBuffer{ "", "" };
-    StringBuffer << "export interface " << SafeName(Class->GetName());
-    if (IsWidget) StringBuffer << "Props";
-
-    auto Super = Class->GetSuperStruct();
-
-    if (Super && (Super->IsChildOf<UPanelSlot>() || Super->IsChildOf<UWidget>()))
-    {
-        Gen(Super);
-        StringBuffer << " extends " << SafeName(Super->GetName());
-        if (Super->IsChildOf<UWidget>()) StringBuffer << "Props";
-    }
-    else if (IsWidget) {
-        StringBuffer << " extends Props";
-    }
-
-    StringBuffer << " {\n";
-
-    for (TFieldIterator<PropertyMacro> PropertyIt(Class, EFieldIteratorFlags::ExcludeSuper); PropertyIt; ++PropertyIt)
-    {
-        auto Property = *PropertyIt;
-        if (!IsReactSupportProperty(Property)) continue;
-        FStringBuffer TmpBuff;
-        TmpBuff << SafeName(Property->GetName()) << "?: ";
-        TArray<UObject *> RefTypesTmp;
-        if (!IsWidget && IsDelegate(Property))//UPanelSlot skip delegate
-        {
-            continue;
-        }
-        if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp, false, true))
-        {
-            continue;
-        }
-        for (auto Type : RefTypesTmp)
-        {
-            Gen(Type);
-        }
-        StringBuffer << "    " << TmpBuff.Buffer << ";\n";
-    }
-
-    StringBuffer << "}\n\n";
-
-    if (IsWidget) {
-        StringBuffer << "export class " << SafeName(Class->GetName()) << " extends React.Component<" << SafeName(Class->GetName()) << "Props> {}\n\n";
-    }
-
-    Output << StringBuffer;
-}
-
-void FReactDeclarationGenerator::GenStruct(UStruct *Struct)
-{
-    FStringBuffer StringBuffer{ "", "" };
-    StringBuffer << "export interface " << SafeName(Struct->GetName());
-
-    auto Super = Struct->GetSuperStruct();
-
-    if (Super)
-    {
-        Gen(Super);
-        StringBuffer << " extends " << SafeName(Super->GetName());
-    }
-
-    StringBuffer << " {\n";
-
-    for (TFieldIterator<PropertyMacro> PropertyIt(Struct, EFieldIteratorFlags::ExcludeSuper); PropertyIt; ++PropertyIt)
-    {
-        auto Property = *PropertyIt;
-        if (Property->IsA<DelegatePropertyMacro>() || Property->IsA<MulticastDelegatePropertyMacro>()) continue;
-        if (!IsReactSupportProperty(Property)) continue;
-        FStringBuffer TmpBuff;
-        TmpBuff << SafeName(Property->GetName()) << "?: ";
-        TArray<UObject *> RefTypesTmp;
-        if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp))
-        {
-            continue;
-        }
-        for (auto Type : RefTypesTmp)
-        {
-            Gen(Type);
-        }
-        StringBuffer << "    " << TmpBuff.Buffer << ";\n";
-    }
-
-    StringBuffer << "}\n\n";
-
-    Output << StringBuffer;
-}
-
-void FReactDeclarationGenerator::GenEnum(UEnum *Enum)
-{
-    FStringBuffer StringBuffer{ "", "" };
-
-    TArray<FString> EnumListerrals;
-    for (int i = 0; i < Enum->NumEnums(); ++i)
-    {
-        auto Name = Enum->GetNameStringByIndex(i);
-        if (INDEX_NONE == EnumListerrals.Find(Name))
-        {
-            EnumListerrals.Add(Name);
-        }
-    }
-
-    StringBuffer << "export type " << SafeName(Enum->GetName()) << " = ";
-    TArray<FString> Arr1;
-    TArray<FString> Arr2;
-    for (auto Name : EnumListerrals)
-    {
-        Arr1.Add(TEXT("\"") + Name + TEXT("\""));
-        Arr2.Add(Name + TEXT(": \"") + Name + TEXT("\""));
-    }
-
-    StringBuffer << FString::Join(Arr1, TEXT(" | ")) << ";\n";
-    StringBuffer << "export const " << SafeName(Enum->GetName()) << ": {" << FString::Join(Arr2, TEXT(" ,")) << "};\n";
-
-    Output << StringBuffer;
-}
-
-//--- FSlotDeclarationGenerator end ---
 class FToolBarBuilder;
 
 #define LOCTEXT_NAMESPACE "FGenDTSModule"
@@ -821,6 +919,7 @@ class FDeclarationGenerator : public IDeclarationGenerator
 {
 private:
     TSharedPtr<class FUICommandList> PluginCommands;
+	TUniquePtr<FAutoConsoleCommand> ConsoleCommand;
 
     void AddToolbarExtension(FToolBarBuilder& Builder)
     {
@@ -831,7 +930,17 @@ private:
     {
         LoadAllWidgetBlueprint();
         GenTypeScriptDeclaration();
-        GenReactDeclaration();
+
+        TArray<UClass*> SortedClasses(GetSortedClasses());
+        for (int i = 0; i < SortedClasses.Num(); ++i)
+        {
+            UClass* Class = SortedClasses[i];
+            if (Class->ImplementsInterface(UCodeGenerator::StaticClass()))
+            {
+                ICodeGenerator::Execute_Gen(Class->GetDefaultObject());
+            }
+        }
+
         FText DialogText = FText::Format(
             LOCTEXT("PluginButtonDialogText", "genertate finish, {0} store in {1}"),
             FText::FromString(TEXT("ue.d.ts")),
@@ -869,6 +978,10 @@ public:
 
             LevelEditorModule.GetToolBarExtensibilityManager()->AddExtender(ToolbarExtender);
         }
+
+		ConsoleCommand = MakeUnique<FAutoConsoleCommand>(TEXT("Puerts.Gen")
+			, TEXT("Execute GenDTS action")
+			, FConsoleCommandDelegate::CreateRaw(this, &FDeclarationGenerator::GenUeDts));
     }
 
     void ShutdownModule() override 
@@ -883,30 +996,19 @@ public:
 #if WITH_EDITOR
         FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked< FAssetRegistryModule >(FName("AssetRegistry"));
         IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
-        TArray< FString > ContentPaths;
-        ContentPaths.Add(TEXT("/Game"));
-        AssetRegistry.ScanPathsSynchronous(ContentPaths);
 
         TArray< FAssetData > AssetList;
-        AssetRegistry.GetAssetsByClass(FName("Blueprint"), AssetList);
 
-        for (auto const& Asset : AssetList)
+        FARFilter BPFilter;
+        BPFilter.PackagePaths.Add(FName(TEXT("/Game")));
+        BPFilter.bRecursivePaths = true;
+        BPFilter.bRecursiveClasses = true;
+        BPFilter.ClassNames.Add(FName(TEXT("Blueprint")));
+
+        AssetRegistry.GetAssets(BPFilter, AssetList);
+        for (FAssetData const& Asset : AssetList)
         {
-            if (Asset.ObjectPath.ToString().StartsWith("/Game/"))
-            {
-                Asset.GetAsset();
-            }
-        }
-
-        TArray< FAssetData > AssetList1;
-        AssetRegistry.GetAssetsByClass(FName("WidgetBlueprint"), AssetList1);
-
-        for (auto const& Asset : AssetList1)
-        {
-            if (Asset.ObjectPath.ToString().StartsWith("/Game/"))
-            {
-                Asset.GetAsset();
-            }
+            Asset.GetAsset();
         }
 #endif
     }
@@ -919,8 +1021,7 @@ public:
 
     void GenReactDeclaration() override
     {
-        FReactDeclarationGenerator ReactDeclarationGenerator;
-        ReactDeclarationGenerator.GenReactDeclaration();
+        
     }
     
 	/*

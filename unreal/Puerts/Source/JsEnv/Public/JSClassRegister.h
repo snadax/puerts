@@ -7,11 +7,23 @@
 
 #pragma once
 
+#include "functional"
+
+#if USING_IN_UNREAL_ENGINE
 #include "CoreMinimal.h"
+#else
+#define JSENV_API
+#define FORCEINLINE V8_INLINE
+#define UPTRINT uintptr_t
+#endif
+
+#include <string>
 
 #pragma warning(push, 0) 
 #include "v8.h"
 #pragma warning(pop)
+
+#include "TypeInfo.hpp"
 
 namespace puerts
 {
@@ -19,47 +31,70 @@ struct JSENV_API JSFunctionInfo
 {
     const char* Name;
     v8::FunctionCallback Callback;
+    void *Data = nullptr;
 };
 
 struct JSENV_API JSPropertyInfo
 {
     const char* Name;
-    v8::AccessorNameGetterCallback Getter;
-    v8::AccessorNameSetterCallback Setter;
+    v8::FunctionCallback Getter;
+    v8::FunctionCallback Setter;
+    void *Data = nullptr;
 };
 
 typedef void(*FinalizeFunc)(void* Ptr);
 
 typedef void*(*InitializeFunc)(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
+struct NamedFunctionInfo
+{
+    const char* Name;
+    const CFunctionInfo* Type;
+};
+
+struct NamedPropertyInfo
+{
+    const char* Name;
+    const char* Type;
+};
+
 struct JSENV_API JSClassDefinition
 {
-    const char* CDataName;
-    const char* CDataSuperName;
-    const char* UStructName;
+    const char* CPPTypeName;
+    const char* CPPSuperTypeName;
+    const char* UETypeName;
     InitializeFunc Initialize;
     JSFunctionInfo* Methods;    //成员方法
     JSFunctionInfo* Functions;  //静态方法
-    JSPropertyInfo* Propertys;
+    JSPropertyInfo* Properties;
     FinalizeFunc Finalize;
     //int InternalFieldCount;
+    NamedFunctionInfo* ConstructorInfos;
+    NamedFunctionInfo* MethodInfos;
+    NamedFunctionInfo* FunctionInfos;
+    NamedPropertyInfo* PropertyInfos;
 };
 
-typedef void(*AddonRegisterFunc)(v8::Isolate* Isolate, v8::Local<v8::Context> Context, v8::Local<v8::Object> Exports);
+#define JSClassEmptyDefinition { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 
-#define JSClassEmptyDefinition { 0, 0, 0, 0, 0, 0, 0, 0 }
+void JSENV_API RegisterJSClass(const JSClassDefinition &ClassDefinition);
 
-void JSENV_API RegisterClass(const JSClassDefinition &ClassDefinition);
-
-void RegisterAddon(const char* Name, AddonRegisterFunc RegisterFunc);
+void JSENV_API ForeachRegisterClass(std::function<void(const JSClassDefinition *ClassDefinition)>);
 
 const JSClassDefinition* FindClassByID(const char* Name);
 
-const JSClassDefinition* FindClassByType(UStruct* Type);
+const JSClassDefinition* FindCppTypeClassByName(const std::string& Name);
 
-const JSClassDefinition* FindCDataClassByName(const FString& Name);
+typedef void(*AddonRegisterFunc)(v8::Local<v8::Context> Context, v8::Local<v8::Object> Exports);
 
-AddonRegisterFunc FindAddonRegisterFunc(const FString& Name);
+AddonRegisterFunc FindAddonRegisterFunc(const std::string& Name);
+
+void RegisterAddon(const char* Name, AddonRegisterFunc RegisterFunc);
+
+#if USING_IN_UNREAL_ENGINE
+JSENV_API const JSClassDefinition* FindClassByType(UStruct* Type);
+#endif
+
 }
 
 #define PUERTS_MODULE(Name, RegFunc) \
